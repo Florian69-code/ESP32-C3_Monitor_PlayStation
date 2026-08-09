@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="card">
+    <header>
+      <h1>{{TITLE}}</h1>
+    </header>
+    <nav>
+      <a class="{{ACTIVE_HOME}}" href="/">Accueil</a>
+      <a class="{{ACTIVE_HISTORY}}" href="/history">Historique PWM</a>
+      <a class="{{ACTIVE_PROFILE}}" href="/profile">Profil</a>
+      <a class="{{ACTIVE_CONSOLE}}" href="/console">Console</a>
+    </nav>
+    <main>
+      <h2>Page Profil</h2>
+      <p>Modifie les parametres utilises par l'ESP32-C3, puis applique immediatement.</p>
+      {{NOTICE}}
+      <div class="grid cols-2">
+        <section class="section">
+          <h3>1. Profil utilise</h3>
+          <form method="post" action="/profile/apply" onsubmit="return confirm('Sauvegarder puis redemarrer l\'ESP32-C3 pour appliquer les changements ?');">
+            <label for="profile">Profil console</label>
+            <select id="profile" name="profile">
+              {{PROFILE_OPTIONS}}
+            </select>
+
+            <label for="idle_cool_max" title="{{TIP_IDLE_COOL_MAX}}">IDLE_COOL_MAX (%)</label>
+            <input id="idle_cool_max" name="idle_cool_max" type="number" step="0.5" min="0" max="100" value="{{IDLE_COOL_MAX}}" required>
+
+            <label for="game_cool_max" title="{{TIP_GAME_COOL_MAX}}">GAME_COOL_MAX (%)</label>
+            <input id="game_cool_max" name="game_cool_max" type="number" step="0.5" min="0" max="100" value="{{GAME_COOL_MAX}}" required>
+
+              <label for="game_hot_max" title="{{TIP_GAME_HOT_MAX}}">GAME_HOT_MAX (%)</label>
+              <input id="game_hot_max" name="game_hot_max" type="number" step="0.5" min="0" max="100" value="{{GAME_HOT_MAX}}" required>
+            <p class="inline-help">Survoler les labels pour afficher la description de chaque seuil.</p>
+
+            <label for="icon_mode">2. Images OLED</label>
+            <select id="icon_mode" name="icon_mode">
+              {{ICON_MODE_OPTIONS}}
+            </select>
+            <p class="inline-help">simple : texte seul ; smiley : visages selon l'etat.</p>
+
+            <div class="btn-row">
+              <button class="primary" type="submit">Appliquer les parametres</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="section">
+          <h3>3. Remise a zero</h3>
+          <p>Reinitialise la configuration sauvegardee, puis redemarre l'ESP32-C3.</p>
+          <form method="post" action="/profile/reset" onsubmit="return confirm('Confirmer la remise a zero ? Cette action est irreversible.');">
+            <div class="btn-row">
+              <button class="danger" type="submit">Remise a zero + Redemarrage</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script>
+    const profileSelect = document.getElementById('profile');
+    const idleInput = document.getElementById('idle_cool_max');
+    const coolInput = document.getElementById('game_cool_max');
+    const hotInput = document.getElementById('game_hot_max');
+    const thresholdsByProfile = {{PROFILE_THRESHOLDS_JSON}};
+
+    function applyThresholdsForProfile(profileValue) {
+      const thresholds = thresholdsByProfile[String(profileValue)];
+      if (!thresholds) {
+        return;
+      }
+
+      idleInput.value = Number(thresholds.idle).toFixed(1);
+      coolInput.value = Number(thresholds.cool).toFixed(1);
+      hotInput.value = Number(thresholds.hot).toFixed(1);
+    }
+
+    if (profileSelect && idleInput && coolInput && hotInput) {
+      profileSelect.addEventListener('change', () => applyThresholdsForProfile(profileSelect.value));
+    }
+  </script>
+</body>
+</html>

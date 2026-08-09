@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="{{REFRESH_SECONDS}}; url=/console">
+  <title>{{TITLE}}</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="card">
+    <header>
+      <h1>{{TITLE}}</h1>
+    </header>
+    <nav>
+      <a class="{{ACTIVE_HOME}}" href="/">Accueil</a>
+      <a class="{{ACTIVE_HISTORY}}" href="/history">Historique PWM</a>
+      <a class="{{ACTIVE_PROFILE}}" href="/profile">Profil</a>
+      <a class="{{ACTIVE_CONSOLE}}" href="/console">Console</a>
+    </nav>
+    {{NOTICE}}
+    <section class="section">
+      <form method="post" action="/console/settings" onsubmit="return confirm('Enregistrer les parametres de logs puis redemarrer l\'ESP32-C3 ?');">
+        <div class="grid cols-2">
+          <div>
+            <label for="log_level">Niveau LOG</label>
+            <select id="log_level" name="log_level">
+              {{LOG_LEVEL_OPTIONS}}
+            </select>
+          </div>
+          <div>
+            <label for="refresh_seconds">Refresh Console</label>
+            <select id="refresh_seconds" name="refresh_seconds">
+              {{REFRESH_OPTIONS}}
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="primary" type="submit">Enregistrer + Redemarrer</button>
+        </div>
+      </form>
+    </section>
+    <div class="log-box">
+      {{LOG_CONTENT}}
+    </div>
+  </div>
+</body>
+</html>

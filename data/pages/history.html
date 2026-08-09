@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="card">
+    <header>
+      <h1>{{TITLE}}</h1>
+    </header>
+    <nav>
+      <a class="{{ACTIVE_HOME}}" href="/">Accueil</a>
+      <a class="{{ACTIVE_HISTORY}}" href="/history">Historique PWM</a>
+      <a class="{{ACTIVE_PROFILE}}" href="/profile">Profil</a>
+      <a class="{{ACTIVE_CONSOLE}}" href="/console">Console</a>
+    </nav>
+    <main>
+      <h2>Historique PWM</h2>
+      <div class="grid cols-2">
+        <section class="section">
+          <h3>Valeurs en direct</h3>
+          <p>PWM actuel : <strong id="pwmCurrent">-- %</strong></p>
+          <p>PWM max : <strong id="pwmMax">-- %</strong></p>
+          <p>Frequence : <strong id="pwmFrequency">-- Hz</strong></p>
+          <p class="inline-help" id="lastUpdate">Derniere mise a jour: --</p>
+        </section>
+        <section class="section">
+          <h3>Graphique des derniers echantillons</h3>
+          <div class="grid cols-2">
+            <p>
+              <label for="rangeSelect">Plage affichee</label>
+              <select id="rangeSelect">
+                <option value="60">1 min</option>
+                <option value="300">5 min</option>
+                <option value="600">10 min</option>
+                <option value="all">Tous</option>
+              </select>
+            </p>
+            <p>
+              <label for="yMaxInput">Axe Y max (%)</label>
+              <input id="yMaxInput" type="number" min="10" max="100" step="5" value="70">
+            </p>
+          </div>
+          <canvas id="pwmChart" width="900" height="320" style="width:100%;height:auto;display:block;"></canvas>
+          <p class="inline-help">Le graphe conserve un point par seconde pendant toute la session Web. La plage 1 min decale automatiquement la fenetre au fil du temps.</p>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const currentEl = document.getElementById('pwmCurrent');
+    const maxEl = document.getElementById('pwmMax');
+    const freqEl = document.getElementById('pwmFrequency');
+    const updateEl = document.getElementById('lastUpdate');
+    const rangeSelect = document.getElementById('rangeSelect');
+    const yMaxInput = document.getElementById('yMaxInput');
+    const canvas = document.getElementById('pwmChart');
+    const ctx = canvas.getContext('2d');
+    const sessionStartMs = Date.now();
+    const samples = [];
+    let refreshInFlight = false;
+
+    const RANGE_TICKS = {
+      '60': 5,
+      '300': 30,
+      '600': 60,
+    };
+
+    function getElapsedSeconds() {
+      return Math.max(0, Math.floor((Date.now() - sessionStartMs) / 1000));
+    }
+
+    function upsertSample(second, value) {
+      const numericValue = Number.isFinite(value) ? value : Number.NaN;
+      const lastSample = samples[samples.length - 1];
+      if (lastSample && lastSample.second === second) {
+        lastSample.value = numericValue;
+        return;
+      }
+
+      samples.push({ second, value: numericValue });
+    }
+
+    function parseRangeSeconds() {
+      return rangeSelect.value === 'all' ? null : Number(rangeSelect.value);
+    }
+
+    function sanitizeYAxisMax() {
+      const parsed = Number(yMaxInput.value);
+      if (!Number.isFinite(parsed)) {
+        return 70;
+      }
+
+      const clamped = Math.min(100, Math.max(10, parsed));
+      return Math.round(clamped / 5) * 5;
+    }
+
+    function formatElapsedLabel(totalSeconds) {
+      const rounded = Math.max(0, Math.floor(totalSeconds));
+      const minutes = Math.floor(rounded / 60);
+      const seconds = rounded % 60;
+      return minutes > 0
+        ? `${minutes}m${String(seconds).padStart(2, '0')}`
+        : `${seconds}s`;
+    }
+
+    function getTickIntervalSeconds(rangeSeconds, spanSeconds) {
+      if (rangeSeconds !== null) {
+        return RANGE_TICKS[String(rangeSeconds)] || 60;
+      }
+
+      const candidates = [5, 10, 15, 30, 60, 120, 300, 600];
+      const targetTicks = 8;
+      for (const candidate of candidates) {
+        if (spanSeconds / candidate <= targetTicks) {
+          return candidate;
+        }
+      }
+
+      return 600;
+    }
+
+    function formatPercent(value) {
+      return Number.isFinite(value) ? `${value.toFixed(1)} %` : '-- %';
+    }
+
+    function formatFrequency(value) {
+      return Number.isFinite(value) ? `${value.toFixed(0)} Hz` : '-- Hz';
+    }
+
+    function drawChart() {
+      const width = canvas.width;
+      const height = canvas.height;
+      ctx.clearRect(0, 0, width, height);
+
+      ctx.fillStyle = 'rgba(3, 8, 15, 0.85)';
+      ctx.fillRect(0, 0, width, height);
+
+      const left = 58;
+      const right = width - 14;
+      const top = 16;
+      const bottom = height - 36;
+      const graphWidth = right - left;
+      const graphHeight = bottom - top;
+
+      const elapsedSeconds = getElapsedSeconds();
+      const rangeSeconds = parseRangeSeconds();
+      const visibleStart = rangeSeconds === null ? 0 : Math.max(0, elapsedSeconds - rangeSeconds);
+      const visibleEnd = Math.max(1, elapsedSeconds);
+      const spanSeconds = Math.max(1, visibleEnd - visibleStart);
+      const yMax = sanitizeYAxisMax();
+      const visibleSamples = samples.filter((sample) => sample.second >= visibleStart && sample.second <= visibleEnd);
+      const values = visibleSamples.map((sample) => sample.value).filter((value) => Number.isFinite(value));
+
+      if (values.length === 0) {
+        ctx.fillStyle = '#a2b4cd';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('Aucune donnee historique disponible', left, top + 24);
+        return;
+      }
+
+      ctx.strokeStyle = 'rgba(135, 164, 205, 0.24)';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = '#a2b4cd';
+      ctx.font = '12px monospace';
+
+      for (let tickValue = 0; tickValue <= yMax; tickValue += 5) {
+        const ratio = tickValue / yMax;
+        const y = bottom - ratio * graphHeight;
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+        ctx.fillText(`${tickValue}%`, 6, y + 4);
+      }
+
+      ctx.strokeStyle = 'rgba(135, 164, 205, 0.48)';
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(left, bottom);
+      ctx.lineTo(right, bottom);
+      ctx.stroke();
+
+      const tickInterval = getTickIntervalSeconds(rangeSeconds, spanSeconds);
+      const firstTick = Math.ceil(visibleStart / tickInterval) * tickInterval;
+      for (let tickSecond = firstTick; tickSecond <= visibleEnd; tickSecond += tickInterval) {
+        const x = left + ((tickSecond - visibleStart) / spanSeconds) * graphWidth;
+        ctx.strokeStyle = 'rgba(135, 164, 205, 0.36)';
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+
+        ctx.fillStyle = '#a2b4cd';
+        ctx.fillText(formatElapsedLabel(tickSecond), Math.max(left, x - 16), height - 10);
+      }
+
+      ctx.strokeStyle = '#4ad2ff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let started = false;
+
+      for (const sample of visibleSamples) {
+        const value = sample.value;
+        if (!Number.isFinite(value)) {
+          started = false;
+          continue;
+        }
+
+        const clampedValue = Math.max(0, Math.min(yMax, value));
+        const x = left + ((sample.second - visibleStart) / spanSeconds) * graphWidth;
+        const y = bottom - (clampedValue / yMax) * graphHeight;
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
+
+      ctx.fillStyle = '#a2b4cd';
+      ctx.font = '13px monospace';
+      ctx.fillText(`Fenetre: ${formatElapsedLabel(visibleStart)} -> ${formatElapsedLabel(visibleEnd)}`, left, height - 18);
+    }
+
+    async function refreshHistory() {
+      if (refreshInFlight) {
+        return;
+      }
+
+      refreshInFlight = true;
+      try {
+        const response = await fetch('/api/history', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const current = Number(payload.current);
+        const max = Number(payload.max);
+        const frequency = Number(payload.frequency_hz);
+
+        currentEl.textContent = formatPercent(current);
+        maxEl.textContent = formatPercent(max);
+        freqEl.textContent = formatFrequency(frequency);
+        updateEl.textContent = `Derniere mise a jour: ${new Date().toLocaleTimeString()}`;
+        upsertSample(getElapsedSeconds(), current);
+        drawChart();
+      } catch (error) {
+        updateEl.textContent = `Erreur de lecture: ${error.message}`;
+      } finally {
+        refreshInFlight = false;
+      }
+    }
+
+    rangeSelect.addEventListener('change', drawChart);
+    yMaxInput.addEventListener('change', () => {
+      yMaxInput.value = String(sanitizeYAxisMax());
+      drawChart();
+    });
+
+    refreshHistory();
+    setInterval(refreshHistory, 1000);
+  </script>
+</body>
+</html>

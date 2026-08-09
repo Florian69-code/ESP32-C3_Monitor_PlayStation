@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="card">
+    <header>
+      <h1>{{TITLE}}</h1>
+    </header>
+    <nav>
+      <a class="{{ACTIVE_HOME}}" href="/">Accueil</a>
+      <a class="{{ACTIVE_HISTORY}}" href="/history">Historique PWM</a>
+      <a class="{{ACTIVE_PROFILE}}" href="/profile">Profil</a>
+      <a class="{{ACTIVE_CONSOLE}}" href="/console">Console</a>
+    </nav>
+    <main>
+      <h2>Accueil</h2>
+      <p>Mode Web actif sur l'ESP32-C3.</p>
+      <div class="section">
+        <p>SSID : {{SSID}}</p>
+        <p>URL locale : {{WEB_URL}}</p>
+        <p>Port : {{WEB_PORT}}</p>
+        <p>Niveau LOG : {{LOG_LEVEL}}</p>
+        <p>Refresh LOG : {{LOG_REFRESH_SECONDS}}s</p>
+        <p>Profil utilise : {{ACTIVE_PROFILE}}</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
