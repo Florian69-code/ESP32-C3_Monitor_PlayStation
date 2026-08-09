@@ -27,6 +27,9 @@ String getHomePage(const AppState& state);
 // Retourne la page historique (graphe + script fetch API).
 String getHistoryPage();
 
+// Retourne la page des températures des sondes (graphe + script fetch API).
+String getTemperaturePage();
+
 // Retourne la page profil avec seuils, mode icone et message d'etat optionnel.
 String getProfilePage(const AppState& state, const String& statusMessage = String());
 

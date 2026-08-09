@@ -13,6 +13,8 @@ constexpr const char* kPageHistory = "/pages/history.html";
 constexpr const char* kPageProfile = "/pages/profile.html";
 constexpr const char* kPageConsole = "/pages/console.html";
 constexpr const char* kPageRedirect = "/pages/redirect.html";
+constexpr const char* kPageTemperature = "/pages/temperature.html";
+
 
 String profileToOption(ConsoleProfile profile, ConsoleProfile activeProfile, const char* label);
 String iconModeToOption(uint8_t mode, uint8_t activeMode, const char* label);
@@ -77,6 +79,7 @@ const char* getCurrentLogLevelName(const uint8_t levelValue) {
 
 String getNavHtml(const char* activeHome,
                   const char* activeHistory,
+                  const char* activeTemperature,
                   const char* activeProfile,
                   const char* activeConsole) {
   String nav;
@@ -84,6 +87,7 @@ String getNavHtml(const char* activeHome,
   nav += "<nav>";
   nav += String("<a class=\"") + activeHome + "\" href=\"/\">Accueil</a>";
   nav += String("<a class=\"") + activeHistory + "\" href=\"/history\">Historique PWM</a>";
+  nav += String("<a class=\"") + activeTemperature + "\" href=\"/temperature\">Temperature</a>";
   nav += String("<a class=\"") + activeProfile + "\" href=\"/profile\">Profil</a>";
   nav += String("<a class=\"") + activeConsole + "\" href=\"/console\">Console</a>";
   nav += "</nav>";
@@ -95,6 +99,7 @@ String wrapFallbackPage(const String& title,
                         bool showNav,
                         const char* activeHome,
                         const char* activeHistory,
+                        const char* activeTemperature,
                         const char* activeProfile,
                         const char* activeConsole) {
   String html;
@@ -105,7 +110,7 @@ String wrapFallbackPage(const String& title,
   html += title;
   html += "</h1></header>";
   if (showNav) {
-    html += getNavHtml(activeHome, activeHistory, activeProfile, activeConsole);
+    html += getNavHtml(activeHome, activeHistory, activeTemperature, activeProfile, activeConsole);
   }
   html += bodyContent;
   html += "</div></body></html>";
@@ -115,12 +120,14 @@ String wrapFallbackPage(const String& title,
 void fillNavTokens(web_storage::TemplateToken* tokens,
                    const char* activeHome,
                    const char* activeHistory,
+                   const char* activeTemperature,
                    const char* activeProfile,
                    const char* activeConsole) {
   tokens[0] = {"{{ACTIVE_HOME}}", String(activeHome)};
   tokens[1] = {"{{ACTIVE_HISTORY}}", String(activeHistory)};
-  tokens[2] = {"{{ACTIVE_PROFILE}}", String(activeProfile)};
-  tokens[3] = {"{{ACTIVE_CONSOLE}}", String(activeConsole)};
+  tokens[2] = {"{{ACTIVE_TEMPERATURE}}", String(activeTemperature)};
+  tokens[3] = {"{{ACTIVE_PROFILE}}", String(activeProfile)};
+  tokens[4] = {"{{ACTIVE_CONSOLE}}", String(activeConsole)};
 }
 
 String buildNoticeHtml(const String& statusMessage) {
@@ -150,12 +157,17 @@ String buildFallbackHomeHtml(const AppState& state) {
                          "</p><p>Profil utilise : " +
                          getProfileName(state.activeProfile) +
                          "</p></div></main>";
-  return wrapFallbackPage(web_config::WEB_TITLE, content, true, "active", "", "", "");
+  return wrapFallbackPage(web_config::WEB_TITLE, content, true, "active", "", "", "", "");
 }
 
 String buildFallbackHistoryHtml() {
   const String content = R"HISTORY(<main><h2>Historique PWM</h2><div class="grid cols-2"><section class="section"><h3>Valeurs en direct</h3><p>PWM actuel : <strong id="pwmCurrent">-- %</strong></p><p>PWM max : <strong id="pwmMax">-- %</strong></p><p>Frequence : <strong id="pwmFrequency">-- Hz</strong></p><p class="inline-help" id="lastUpdate">Derniere mise a jour: --</p></section><section class="section"><h3>Graphique des derniers echantillons</h3><div class="grid cols-2"><p><label for="rangeSelect">Plage affichee</label><select id="rangeSelect"><option value="60">1 min</option><option value="300">5 min</option><option value="600">10 min</option><option value="all">Tous</option></select></p><p><label for="yMaxInput">Axe Y max (%)</label><input id="yMaxInput" type="number" min="10" max="100" step="5" value="70"></p></div><canvas id="pwmChart" width="900" height="320" style="width:100%;height:auto;display:block;"></canvas><p class="inline-help">Le graphe conserve un point par seconde pendant toute la session Web. La plage 1 min decale automatiquement la fenetre au fil du temps.</p></section></div></main><script>const currentEl=document.getElementById('pwmCurrent');const maxEl=document.getElementById('pwmMax');const freqEl=document.getElementById('pwmFrequency');const updateEl=document.getElementById('lastUpdate');const rangeSelect=document.getElementById('rangeSelect');const yMaxInput=document.getElementById('yMaxInput');const canvas=document.getElementById('pwmChart');const ctx=canvas.getContext('2d');const sessionStartMs=Date.now();const samples=[];let refreshInFlight=false;const RANGE_TICKS={'60':5,'300':30,'600':60};function getElapsedSeconds(){return Math.max(0,Math.floor((Date.now()-sessionStartMs)/1000));}function upsertSample(second,value){const numericValue=Number.isFinite(value)?value:Number.NaN;const lastSample=samples[samples.length-1];if(lastSample&&lastSample.second===second){lastSample.value=numericValue;return;}samples.push({second,value:numericValue});}function parseRangeSeconds(){return rangeSelect.value==='all'?null:Number(rangeSelect.value);}function sanitizeYAxisMax(){const parsed=Number(yMaxInput.value);if(!Number.isFinite(parsed)){return 70;}const clamped=Math.min(100,Math.max(10,parsed));return Math.round(clamped/5)*5;}function formatElapsedLabel(totalSeconds){const rounded=Math.max(0,Math.floor(totalSeconds));const minutes=Math.floor(rounded/60);const seconds=rounded%60;return minutes>0?`${minutes}m${String(seconds).padStart(2,'0')}`:`${seconds}s`;}function getTickIntervalSeconds(rangeSeconds,spanSeconds){if(rangeSeconds!==null){return RANGE_TICKS[String(rangeSeconds)]||60;}const candidates=[5,10,15,30,60,120,300,600];const targetTicks=8;for(const candidate of candidates){if(spanSeconds/candidate<=targetTicks){return candidate;}}return 600;}function formatPercent(value){return Number.isFinite(value)?`${value.toFixed(1)} %`:'-- %';}function formatFrequency(value){return Number.isFinite(value)?`${value.toFixed(0)} Hz`:'-- Hz';}function drawChart(){const width=canvas.width;const height=canvas.height;ctx.clearRect(0,0,width,height);ctx.fillStyle='rgba(3, 8, 15, 0.85)';ctx.fillRect(0,0,width,height);const left=58;const right=width-14;const top=16;const bottom=height-36;const graphWidth=right-left;const graphHeight=bottom-top;const elapsedSeconds=getElapsedSeconds();const rangeSeconds=parseRangeSeconds();const visibleStart=rangeSeconds===null?0:Math.max(0,elapsedSeconds-rangeSeconds);const visibleEnd=Math.max(1,elapsedSeconds);const spanSeconds=Math.max(1,visibleEnd-visibleStart);const yMax=sanitizeYAxisMax();const visibleSamples=samples.filter((sample)=>sample.second>=visibleStart&&sample.second<=visibleEnd);const values=visibleSamples.map((sample)=>sample.value).filter((value)=>Number.isFinite(value));if(values.length===0){ctx.fillStyle='#a2b4cd';ctx.font='16px sans-serif';ctx.fillText('Aucune donnee historique disponible',left,top+24);return;}ctx.strokeStyle='rgba(135, 164, 205, 0.24)';ctx.lineWidth=1;ctx.fillStyle='#a2b4cd';ctx.font='12px monospace';for(let tickValue=0;tickValue<=yMax;tickValue+=5){const ratio=tickValue/yMax;const y=bottom-ratio*graphHeight;ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(right,y);ctx.stroke();ctx.fillText(`${tickValue}%`,6,y+4);}ctx.strokeStyle='rgba(135, 164, 205, 0.48)';ctx.beginPath();ctx.moveTo(left,top);ctx.lineTo(left,bottom);ctx.lineTo(right,bottom);ctx.stroke();const tickInterval=getTickIntervalSeconds(rangeSeconds,spanSeconds);const firstTick=Math.ceil(visibleStart/tickInterval)*tickInterval;for(let tickSecond=firstTick;tickSecond<=visibleEnd;tickSecond+=tickInterval){const x=left+((tickSecond-visibleStart)/spanSeconds)*graphWidth;ctx.strokeStyle='rgba(135, 164, 205, 0.36)';ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,bottom);ctx.stroke();ctx.fillStyle='#a2b4cd';ctx.fillText(formatElapsedLabel(tickSecond),Math.max(left,x-16),height-10);}ctx.strokeStyle='#4ad2ff';ctx.lineWidth=2;ctx.beginPath();let started=false;for(const sample of visibleSamples){const value=sample.value;if(!Number.isFinite(value)){started=false;continue;}const clampedValue=Math.max(0,Math.min(yMax,value));const x=left+((sample.second-visibleStart)/spanSeconds)*graphWidth;const y=bottom-(clampedValue/yMax)*graphHeight;if(!started){ctx.moveTo(x,y);started=true;}else{ctx.lineTo(x,y);}}ctx.stroke();ctx.fillStyle='#a2b4cd';ctx.font='13px monospace';ctx.fillText(`Fenetre: ${formatElapsedLabel(visibleStart)} -> ${formatElapsedLabel(visibleEnd)}`,left,height-18);}async function refreshHistory(){if(refreshInFlight){return;}refreshInFlight=true;try{const response=await fetch('/api/history',{cache:'no-store'});if(!response.ok){throw new Error(`HTTP ${response.status}`);}const payload=await response.json();const current=Number(payload.current);const max=Number(payload.max);const frequency=Number(payload.frequency_hz);currentEl.textContent=formatPercent(current);maxEl.textContent=formatPercent(max);freqEl.textContent=formatFrequency(frequency);updateEl.textContent=`Derniere mise a jour: ${new Date().toLocaleTimeString()}`;upsertSample(getElapsedSeconds(),current);drawChart();}catch(error){updateEl.textContent=`Erreur de lecture: ${error.message}`;}finally{refreshInFlight=false;}}rangeSelect.addEventListener('change',drawChart);yMaxInput.addEventListener('change',()=>{yMaxInput.value=String(sanitizeYAxisMax());drawChart();});refreshHistory();setInterval(refreshHistory,1000);</script>)HISTORY";
-  return wrapFallbackPage("Historique PWM", content, true, "", "active", "", "");
+  return wrapFallbackPage("Historique PWM", content, true, "", "active", "", "", "");
+}
+
+String buildFallbackTemperatureHtml() {
+  const String content = R"TEMPERATURE(<main><h2>Temperature</h2><p>Ci-dessous le graphique des derniers echantillons de temperature des sondes si elle sont actives.</p><p><label for="rangeSelect">Plage affichee</label><select id="rangeSelect"><option value="60">1 min</option><option value="300">5 min</option><option value="600">10 min</option><option value="all">Tous</option></select></p><h3>Sonde 1</h3><div class="grid cols-2"><section class="section"><h3>Valeurs en direct</h3><p>Temperature actuel : <strong id="temperatureCurrent1">-- %</strong></p><p>Temperature max : <strong id="temperatureMax1">-- %</strong></p><p class="inline-help" id="lastUpdate">Derniere mise a jour: --</p></section><section class="section"><h4>Graphique des derniers echantillons</h4><div class="grid cols-2"><p><label for="yMaxInputTemperature">Axe Y max (°C)</label><input id="yMaxInputTemperature" type="number" min="40" max="120" step="5" value="100"></p></div><canvas id="temperatureChart1" width="900" height="320" style="width:100%;height:auto;display:block;"></canvas><p class="inline-help">Le graphe conserve un point par seconde pendant toute la session Web. La plage 1 min decale automatiquement la fenetre au fil du temps.</p></section></div><p></p><h3>Sonde 2</h3><div class="grid cols-2"><section class="section"><h3>Valeurs en direct</h3><p>Temperature actuel : <strong id="temperatureCurrent2">-- %</strong></p><p>Temperature max : <strong id="temperatureMax2">-- %</strong></p><p class="inline-help" id="lastUpdate">Derniere mise a jour: --</p></section><section class="section"><h4>Graphique des derniers echantillons</h4><div class="grid cols-2"><p><label for="yMaxInputTemperature">Axe Y max (°C)</label><input id="yMaxInputTemperature" type="number" min="40" max="120" step="5" value="100"></p></div><canvas id="temperatureChart2" width="900" height="320" style="width:100%;height:auto;display:block;"></canvas><p class="inline-help">Le graphe conserve un point par seconde pendant toute la session Web. La plage 1 min decale automatiquement la fenetre au fil du temps.</p></section></div></main>)TEMPERATURE";
+  return wrapFallbackPage("Temperature", content, true, "", "", "active", "", "");
 }
 
 String buildLoginFallbackHtml(const String& noticeHtml) {
@@ -221,7 +233,7 @@ String buildFallbackProfileHtml(const AppState& state, const String& statusMessa
   content += "<script>const profileSelect=document.getElementById('profile');const idleInput=document.getElementById('idle_cool_max');const coolInput=document.getElementById('game_cool_max');const hotInput=document.getElementById('game_hot_max');const thresholdsByProfile=";
   content += thresholdsJson;
   content += ";function applyThresholdsForProfile(profileValue){const thresholds=thresholdsByProfile[String(profileValue)];if(!thresholds){return;}idleInput.value=Number(thresholds.idle).toFixed(1);coolInput.value=Number(thresholds.cool).toFixed(1);hotInput.value=Number(thresholds.hot).toFixed(1);}if(profileSelect&&idleInput&&coolInput&&hotInput){profileSelect.addEventListener('change',()=>applyThresholdsForProfile(profileSelect.value));}</script>";
-  return wrapFallbackPage("Profil", content, true, "", "", "active", "");
+  return wrapFallbackPage("Profil", content, true, "", "", "", "active", "");
 }
 
 String buildFallbackConsoleHtml(const String& title,
@@ -253,7 +265,7 @@ String buildFallbackConsoleHtml(const String& title,
   content += "</select></div></div><div class=\"btn-row\"><button class=\"primary\" type=\"submit\">Enregistrer + Redemarrer</button></div></form></section><div class=\"log-box\">";
   content += logContent.length() > 0 ? logContent : String("<p>Aucun log pour le moment.</p>");
   content += "</div></main>";
-  return wrapFallbackPage(title, content, true, "", "", "", "active");
+  return wrapFallbackPage(title, content, true, "", "", "", "", "active");
 }
 
 String profileToOption(const ConsoleProfile profile, const ConsoleProfile activeProfile, const char* label) {
@@ -428,7 +440,7 @@ String web_pages::getLoginPage(const String& errorMessage) {
 
 String web_pages::getHomePage(const AppState& state) {
   web_storage::TemplateToken navTokens[4];
-  fillNavTokens(navTokens, "active", "", "", "");
+  fillNavTokens(navTokens, "active", "", "", "", "");
 
   const web_storage::TemplateToken tokens[] = {
       {"{{TITLE}}", String(web_config::WEB_TITLE)},
@@ -436,6 +448,7 @@ String web_pages::getHomePage(const AppState& state) {
       navTokens[1],
       navTokens[2],
       navTokens[3],
+      navTokens[4],
       {"{{SSID}}", String(web_config::WIFI_SSID)},
       {"{{WEB_URL}}", String(web_config::WEB_HOST_URL)},
       {"{{WEB_PORT}}", String(web_config::WEB_PORT)},
@@ -454,7 +467,7 @@ String web_pages::getHomePage(const AppState& state) {
 
 String web_pages::getHistoryPage() {
   web_storage::TemplateToken navTokens[4];
-  fillNavTokens(navTokens, "", "active", "", "");
+  fillNavTokens(navTokens, "", "active", "", "", "");
 
   const web_storage::TemplateToken tokens[] = {
       {"{{TITLE}}", String("Historique PWM")},
@@ -462,6 +475,7 @@ String web_pages::getHistoryPage() {
       navTokens[1],
       navTokens[2],
       navTokens[3],
+      navTokens[4],
   };
 
   const String rendered = web_storage::renderTemplate(kPageHistory, tokens, sizeof(tokens) / sizeof(tokens[0]));
@@ -470,6 +484,27 @@ String web_pages::getHistoryPage() {
   }
 
   return buildFallbackHistoryHtml();
+}
+
+String web_pages::getTemperaturePage() {
+  web_storage::TemplateToken navTokens[4];
+  fillNavTokens(navTokens, "", "", "active", "", "");
+
+  const web_storage::TemplateToken tokens[] = {
+      {"{{TITLE}}", String("Temperature")},
+      navTokens[0],
+      navTokens[1],
+      navTokens[2],
+      navTokens[3],
+      navTokens[4],
+  };
+
+  const String rendered = web_storage::renderTemplate(kPageTemperature, tokens, sizeof(tokens) / sizeof(tokens[0]));
+  if (rendered.length() > 0) {
+    return rendered;
+  }
+
+  return buildFallbackTemperatureHtml();
 }
 
 String web_pages::getProfilePage(const AppState& state, const String& statusMessage) {
@@ -486,7 +521,7 @@ String web_pages::getProfilePage(const AppState& state, const String& statusMess
       iconModeToOption(1, normalizedMode, "smiley");
 
     web_storage::TemplateToken navTokens[4];
-    fillNavTokens(navTokens, "", "", "active", "");
+    fillNavTokens(navTokens, "", "", "", "active", "");
 
     const web_storage::TemplateToken tokens[] = {
       {"{{TITLE}}", String("Profil")},
@@ -494,6 +529,7 @@ String web_pages::getProfilePage(const AppState& state, const String& statusMess
       navTokens[1],
       navTokens[2],
       navTokens[3],
+      navTokens[4],
       {"{{NOTICE}}", buildNoticeHtml(statusMessage)},
       {"{{PROFILE_OPTIONS}}", profileOptions},
       {"{{IDLE_COOL_MAX}}", formatThresholdValue(state.profileThresholds[profileIndex].idleCoolMax)},
@@ -520,7 +556,7 @@ String web_pages::getConsolePage(const String& title,
                  const uint8_t currentLogLevel,
                  const String& statusMessage) {
   web_storage::TemplateToken navTokens[4];
-  fillNavTokens(navTokens, "", "", "", "active");
+  fillNavTokens(navTokens, "", "", "", "", "active");
 
   const String levelOptions =
     logLevelToOption(static_cast<uint8_t>(log_config::LogLevel::TRACE), currentLogLevel, "TRACE") +
