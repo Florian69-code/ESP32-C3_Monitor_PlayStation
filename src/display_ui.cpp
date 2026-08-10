@@ -349,6 +349,42 @@ void drawGraphDashboard() {
 }
 
 // Affiche les détails bruts : PWM courant, PWM max observé et fréquence.
+void drawTemperaturePage() {
+  auto& state = getAppState();
+  display.clearBuffer();
+  display.setFont(u8g2_font_5x7_tf);
+  drawCenteredText("Temperature", 3);
+
+  const bool hasFirst = state.sensorConfig[0].detected && !isnan(state.sensorConfig[0].currentTemperature);
+  const bool hasSecond = state.sensorConfig[1].detected && !isnan(state.sensorConfig[1].currentTemperature);
+
+  char text[12];
+  display.setFont(u8g2_font_logisoso24_tf);
+  if (hasFirst) {
+    snprintf(text, sizeof(text), "%3.0f", state.sensorConfig[0].currentTemperature);
+  } else {
+    snprintf(text, sizeof(text), "N/A");
+  }
+  display.drawStr(0, 20, text);
+
+  display.setFont(u8g2_font_5x7_tf);
+  display.drawStr(30, 20, "|");
+
+  display.setFont(u8g2_font_logisoso24_tf);
+  if (hasSecond) {
+    snprintf(text, sizeof(text), "%3.0f", state.sensorConfig[1].currentTemperature);
+  } else {
+    snprintf(text, sizeof(text), "N/A");
+  }
+  display.drawStr(38, 20, text);
+
+  display.setFont(u8g2_font_4x6_tf);
+  display.drawStr(0, 38, state.sensorConfig[0].name.length() > 0 ? state.sensorConfig[0].name.c_str() : "sonde1");
+  display.drawStr(38, 38, state.sensorConfig[1].name.length() > 0 ? state.sensorConfig[1].name.c_str() : "sonde2");
+
+  display.sendBuffer();
+}
+
 void drawDetails() {
   auto& state = getAppState();
   display.clearBuffer();
@@ -387,6 +423,11 @@ void drawCurrentPage() {
   auto& state = getAppState();
   if (state.currentPage == DisplayPage::Profile) {
     drawProfilePage();
+    return;
+  }
+
+  if (state.currentPage == DisplayPage::Temperature) {
+    drawTemperaturePage();
     return;
   }
 

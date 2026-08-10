@@ -8,6 +8,7 @@
 #include "../display_ui.h"
 #include "../network/wifi_manager.h"
 #include "../pwm_sampler.h"
+#include "../temperature_manager.h"
 #include "../utils/logger.h"
 
 namespace {
@@ -53,14 +54,20 @@ void loadThresholdPresetForProfile(ConsoleProfile profile) {
   char keyIdleCool[16];
   char keyIdleHot[16];
   char keyGameCool[16];
+  char keyTemperatureIdle[16];
+  char keyTemperatureMax[16];
   snprintf(keyIdleCool, sizeof(keyIdleCool), "%s_i_cool", prefix);
   snprintf(keyIdleHot, sizeof(keyIdleHot), "%s_i_hot", prefix);
   snprintf(keyGameCool, sizeof(keyGameCool), "%s_g_cool", prefix);
+  snprintf(keyTemperatureIdle, sizeof(keyTemperatureIdle), "%s_t_idle", prefix);
+  snprintf(keyTemperatureMax, sizeof(keyTemperatureMax), "%s_t_max", prefix);
 
   auto& thresholds = getAppState().profileThresholds[idx];
   thresholds.idleCoolMax = preferences.getFloat(keyIdleCool, defaults.idleCoolMax);
   thresholds.gameCoolMax = preferences.getFloat(keyIdleHot, defaults.gameCoolMax);
   thresholds.gameHotMax = preferences.getFloat(keyGameCool, defaults.gameHotMax);
+  thresholds.temperatureIdle = preferences.getFloat(keyTemperatureIdle, defaults.temperatureIdle);
+  thresholds.temperatureMax = preferences.getFloat(keyTemperatureMax, defaults.temperatureMax);
 }
 
 bool buttonIsPressed();
@@ -134,6 +141,7 @@ void loadPersistedSettings() {
   loadThresholdPresetForProfile(ConsoleProfile::PS5_FAT);
   loadThresholdPresetForProfile(ConsoleProfile::PS4_PRO);
   loadThresholdPresetForProfile(ConsoleProfile::PS3_FAT);
+  temperature_manager::loadFromPreferences(preferences, getAppState().activeProfile);
 
   const uint8_t storedIconMode = preferences.getUChar("icon_mode", 1);
   getAppState().iconMode = storedIconMode > 1 ? 1 : storedIconMode;
@@ -193,6 +201,7 @@ void initializeApp() {
   wifi_manager::initializeWebServer(webServer);
   webServer.begin();
   pwmSampler.begin();
+  temperature_manager::initialize();
 }
 
 void handleShortPress() {
@@ -335,6 +344,10 @@ bool resetProfilePageSettingsToDefaults() {
   };
 
   for (const ConsoleProfile profile : profiles) {
+    temperature_manager::clearPersistedSettings(preferences, profile);
+  }
+
+  for (const ConsoleProfile profile : profiles) {
     const ProfileThresholdPreset defaults = getDefaultProfileThresholdPreset(profile);
     const char* prefix = getProfileStoragePrefix(profile);
 
@@ -393,6 +406,7 @@ void updateApp() {
     addHistoryPoint(state.dutyFiltered);
   }
 
+  temperature_manager::update();
   updateLedState();
   drawCurrentPage();
 }

@@ -11,16 +11,30 @@ enum class DisplayPage : uint8_t {
   StatusFace,
   Graph,
   Details,
+  Temperature,
   Profile,
   Count
 };
 
 // Seuils associes a un profil console.
 // Chaque seuil est exprime en pourcentage PWM.
+// Ces seuils sont utilises pour determiner l'etat de chauffe du systeme et afficher
 struct ProfileThresholds {
   float idleCoolMax = 0.0f;
   float gameCoolMax = 0.0f;
   float gameHotMax = 0.0f;
+  float temperatureIdle = 0.0f;
+  float temperatureMax = 0.0f;
+};
+
+struct SensorConfig {
+  bool enabled = false;
+  bool detected = false;
+  String address = "";
+  String name = "";
+  float currentTemperature = NAN;
+  float temperatureIdleThreshold = 0.0f;
+  float temperatureMaxThreshold = 0.0f;
 };
 
 // Etat global partage entre logique applicative, rendu OLED et interface Web.
@@ -44,11 +58,15 @@ struct AppState {
   bool isFirstSample = true;
   bool signalLost = false;
   bool wifiConnected = false;
+  bool sonde1Detected = false;
+  bool sonde2Detected = false;
 
   // Historique PWM pour graphe OLED/Web.
   float dutyHistory[GRAPH_POINTS] = {};
   // Seuils par profil console.
   ProfileThresholds profileThresholds[CONSOLE_PROFILE_COUNT] = {};
+  // Configuration des sondes de temperature.
+  SensorConfig sensorConfig[2] = {};
 
   // Parametres d'affichage et de logs exposes aussi au Web.
   uint8_t iconMode = 1;

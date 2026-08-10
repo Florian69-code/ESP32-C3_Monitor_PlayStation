@@ -11,6 +11,7 @@
 #include "../config/web_config.h"
 #include "web_pages.h"
 #include "web_storage.h"
+#include "../temperature_manager.h"
 #include "../utils/logger.h"
 
 namespace {
@@ -123,29 +124,93 @@ String applyProfileSettings(WebServer& server) {
     return String("ERR:Profil non supporte.");
   }
 
+  // PWM : Contrôle de cohérence des seuils de vitesse du ventilateur.
   float idleCoolMax = 0.0f;
   float gameCoolMax = 0.0f;
-    float gameHotMax = 0.0f;
+  float gameHotMax = 0.0f;
+  logger::debugf("applyProfileSettings: profile=%d, idle_cool_max=%s, game_cool_max=%s, game_hot_max=%s",
+      static_cast<uint8_t>(selectedProfile),
+      server.arg("idle_cool_max").c_str(),
+      server.arg("game_cool_max").c_str(),
+      server.arg("game_hot_max").c_str());
+
   if (!parseFloatArg(server.arg("idle_cool_max"), idleCoolMax)) {
+    logger::errorf("applyProfileSettings: failed to parse idle_cool_max=%s", server.arg("idle_cool_max").c_str());
     return String("ERR:IDLE_COOL_MAX invalide.");
   }
   if (!parseFloatArg(server.arg("game_cool_max"), gameCoolMax)) {
+    logger::errorf("applyProfileSettings: failed to parse game_cool_max=%s", server.arg("game_cool_max").c_str());
     return String("ERR:GAME_COOL_MAX invalide.");
   }
-    if (!parseFloatArg(server.arg("game_hot_max"), gameHotMax)) {
-      return String("ERR:GAME_HOT_MAX invalide.");
-    }
+  if (!parseFloatArg(server.arg("game_hot_max"), gameHotMax)) {
+    logger::errorf("applyProfileSettings: failed to parse game_hot_max=%s", server.arg("game_hot_max").c_str());
+    return String("ERR:GAME_HOT_MAX invalide.");
+  }
 
   idleCoolMax = constrain(idleCoolMax, THRESHOLD_MIN, THRESHOLD_MAX);
   gameCoolMax = constrain(gameCoolMax, THRESHOLD_MIN, THRESHOLD_MAX);
-    gameHotMax = constrain(gameHotMax, THRESHOLD_MIN, THRESHOLD_MAX);
+  gameHotMax = constrain(gameHotMax, THRESHOLD_MIN, THRESHOLD_MAX);
 
-    if (!(idleCoolMax <= gameCoolMax && gameCoolMax <= gameHotMax)) {
-      return String("ERR:Ordre invalide, attendu: IDLE_COOL_MAX <= GAME_COOL_MAX <= GAME_HOT_MAX.");
+  if (!(idleCoolMax <= gameCoolMax && gameCoolMax <= gameHotMax)) {
+    logger::errorf("applyProfileSettings: invalid order: idle_cool_max=%f, game_cool_max=%f, game_hot_max=%f",
+        idleCoolMax, gameCoolMax, gameHotMax);
+    return String("ERR:Ordre invalide, attendu: IDLE_COOL_MAX <= GAME_COOL_MAX <= GAME_HOT_MAX.");
   }
 
+  // TEMPERATURE : Contrôle de cohérence des seuils de température.
+  float temperatureIdle = 0.0f;
+  float temperatureMax = 0.0f;
+  auto& state = getAppState();
+  logger::debugf("applyProfileSettings: profile=%d, temperature_idle=%s, temperature_max=%s",
+      static_cast<uint8_t>(selectedProfile),
+      server.arg("temperature_idle").c_str(),
+      server.arg("temperature_max").c_str());
+
+  if (!parseFloatArg(server.arg("temperature_idle"), temperatureIdle)) {
+    logger::errorf("applyProfileSettings: failed to parse temperature_idle=%s", server.arg("temperature_idle").c_str());
+    return String("ERR:TEMPERATURE_IDLE invalide.");
+  }
+  if (!parseFloatArg(server.arg("temperature_max"), temperatureMax)) {
+    logger::errorf("applyProfileSettings: failed to parse temperature_max=%s", server.arg("temperature_max").c_str());
+    return String("ERR:TEMPERATURE_MAX invalide.");
+  }
+
+  temperatureIdle = constrain(temperatureIdle, THRESHOLD_MIN, THRESHOLD_MAX);
+  temperatureMax = constrain(temperatureMax, THRESHOLD_MIN, THRESHOLD_MAX);
+
+  if (temperatureIdle > temperatureMax) {
+    logger::errorf("applyProfileSettings: invalid order: temperature_idle=%f, temperature_max=%f",
+        temperatureIdle, temperatureMax);
+    return String("ERR:Ordre invalide, attendu: TEMPERATURE_IDLE <= TEMPERATURE_MAX.");
+  }
+
+  const String sensor1Address = server.arg("sensor1_address");
+  const String sensor2Address = server.arg("sensor2_address");
+  const String sensor1Name = server.arg("sensor1_name");
+  const String sensor2Name = server.arg("sensor2_name");
+  const float sensor1Idle = server.hasArg("sensor1_idle") ? strtof(server.arg("sensor1_idle").c_str(), nullptr) : temperatureIdle;
+  const float sensor1Max = server.hasArg("sensor1_max") ? strtof(server.arg("sensor1_max").c_str(), nullptr) : temperatureMax;
+  const float sensor2Idle = server.hasArg("sensor2_idle") ? strtof(server.arg("sensor2_idle").c_str(), nullptr) : temperatureIdle;
+  const float sensor2Max = server.hasArg("sensor2_max") ? strtof(server.arg("sensor2_max").c_str(), nullptr) : temperatureMax;
+
+  state.sensorConfig[0].address = sensor1Address;
+  state.sensorConfig[0].name = sensor1Name.length() > 0 ? sensor1Name : "sonde1";
+  state.sensorConfig[0].temperatureIdleThreshold = constrain(sensor1Idle, TEMPERATURE_MIN, TEMPERATURE_MAX);
+  state.sensorConfig[0].temperatureMaxThreshold = constrain(sensor1Max, TEMPERATURE_MIN, TEMPERATURE_MAX);
+  state.sensorConfig[0].enabled = sensor1Address.length() > 0;
+  state.sensorConfig[1].address = sensor2Address;
+  state.sensorConfig[1].name = sensor2Name.length() > 0 ? sensor2Name : "sonde2";
+  state.sensorConfig[1].temperatureIdleThreshold = constrain(sensor2Idle, TEMPERATURE_MIN, TEMPERATURE_MAX);
+  state.sensorConfig[1].temperatureMaxThreshold = constrain(sensor2Max, TEMPERATURE_MIN, TEMPERATURE_MAX);
+  state.sensorConfig[1].enabled = sensor2Address.length() > 0;
+
+  // ICONE : Contrôle de cohérence du mode d'affichage des icones.
   uint8_t iconMode = 1;
+  logger::debugf("applyProfileSettings: profile=%d, icon_mode=%s",
+      static_cast<uint8_t>(selectedProfile),
+      server.arg("icon_mode").c_str());
   if (!parseUInt8Arg(server.arg("icon_mode"), iconMode) || iconMode > 1) {
+    logger::errorf("applyProfileSettings: failed to parse icon_mode=%s", server.arg("icon_mode").c_str());
     return String("ERR:Mode image invalide.");
   }
 
@@ -166,16 +231,31 @@ String applyProfileSettings(WebServer& server) {
   preferences.putFloat(keyIdleCool, idleCoolMax);
   preferences.putFloat(keyIdleHot, gameCoolMax);
   preferences.putFloat(keyGameCool, gameHotMax);
+  preferences.putFloat("temperature_idle", temperatureIdle);
+  preferences.putFloat("temperature_max", temperatureMax);
   preferences.putUChar("icon_mode", iconMode);
+  const bool savedSensorConfig = temperature_manager::saveToPreferences(preferences, selectedProfile);
   preferences.end();
+  if (!savedSensorConfig) {
+    logger::warn("[TEMP] sensor configuration was not saved fully");
+  }
+  logger::debugf("preferences saved: profile=%d, idle_cool_max=%f, game_cool_max=%f, game_hot_max=%f, temperature_idle=%f, temperature_max=%f, icon_mode=%d",
+      static_cast<uint8_t>(selectedProfile),
+      idleCoolMax,
+      gameCoolMax,
+      gameHotMax,
+      temperatureIdle,
+      temperatureMax,
+      iconMode);
 
-  auto& state = getAppState();
   state.activeProfile = selectedProfile;
   state.iconMode = iconMode;
   const uint8_t profileIndex = static_cast<uint8_t>(selectedProfile);
   state.profileThresholds[profileIndex].idleCoolMax = idleCoolMax;
   state.profileThresholds[profileIndex].gameCoolMax = gameCoolMax;
   state.profileThresholds[profileIndex].gameHotMax = gameHotMax;
+  state.profileThresholds[profileIndex].temperatureIdle = temperatureIdle;
+  state.profileThresholds[profileIndex].temperatureMax = temperatureMax;
   state.dutyMax = 0.0f;
 
   return String("Parametres sauvegardes. Redemarrage de l'ESP32-C3...");
@@ -230,16 +310,22 @@ bool resetProfileSettings() {
   state.profileThresholds[p5].idleCoolMax = STATUS_PS5F_IDLE_COOL_MAX;
   state.profileThresholds[p5].gameCoolMax = STATUS_PS5F_GAME_COOL_MAX;
   state.profileThresholds[p5].gameHotMax = STATUS_PS5F_GAME_HOT_MAX;
+  state.profileThresholds[p5].temperatureIdle = STATUS_PS5F_TEMPERATURE_IDLE;
+  state.profileThresholds[p5].temperatureMax = STATUS_PS5F_TEMPERATURE_MAX;
 
   const uint8_t p4 = static_cast<uint8_t>(ConsoleProfile::PS4_PRO);
   state.profileThresholds[p4].idleCoolMax = STATUS_PS4P_IDLE_COOL_MAX;
   state.profileThresholds[p4].gameCoolMax = STATUS_PS4P_GAME_COOL_MAX;
   state.profileThresholds[p4].gameHotMax = STATUS_PS4P_GAME_HOT_MAX;
+  state.profileThresholds[p4].temperatureIdle = STATUS_PS4P_TEMPERATURE_IDLE;
+  state.profileThresholds[p4].temperatureMax = STATUS_PS4P_TEMPERATURE_MAX;
 
   const uint8_t p3 = static_cast<uint8_t>(ConsoleProfile::PS3_FAT);
   state.profileThresholds[p3].idleCoolMax = STATUS_PS3F_IDLE_COOL_MAX;
   state.profileThresholds[p3].gameCoolMax = STATUS_PS3F_GAME_COOL_MAX;
   state.profileThresholds[p3].gameHotMax = STATUS_PS3F_GAME_HOT_MAX;
+  state.profileThresholds[p3].temperatureIdle = STATUS_PS3F_TEMPERATURE_IDLE;
+  state.profileThresholds[p3].temperatureMax = STATUS_PS3F_TEMPERATURE_MAX;
 
   logger::setLevel(static_cast<logger::LogLevel>(state.webLogLevel));
   resetHistoryBuffer();
@@ -275,7 +361,9 @@ String buildHistoryJsonPayload() {
     }
   }
 
-  payload += "]}";
+  payload += "],\"temperatures\":";
+  payload += String(temperature_manager::getDetectedSensorsJson().c_str());
+  payload += "}";
   return payload;
 }
 
@@ -372,6 +460,19 @@ void web_ui::initializeRoutes(WebServer& server) {
 
     server.sendHeader("Cache-Control", "no-store");
     server.send(200, "text/html", web_pages::getHistoryPage());
+  });
+
+  server.on("/api/temperature/scan", HTTP_GET, [&server]() {
+    logger::debug("GET /api/temperature/scan");
+    if (!isAuthorized(server)) {
+      server.sendHeader("Cache-Control", "no-store");
+      server.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+      return;
+    }
+
+    temperature_manager::scanSensors();
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", temperature_manager::getDetectedSensorsJson());
   });
 
   server.on("/api/history", HTTP_GET, [&server]() {

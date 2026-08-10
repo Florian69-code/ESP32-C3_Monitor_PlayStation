@@ -18,6 +18,7 @@ Consoles supportees par profil:
 - Ecran OLED I2C 72x40 (SSD1306)
 - 1 bouton de navigation
 - 1 LED de feedback thermique
+- 0, 1 ou 2 sondes DS18B20 (TO-92) sur GPIO 4 avec pull-up 4.7k si présentes
 
 Broches par defaut:
 
@@ -26,6 +27,7 @@ Broches par defaut:
 - GPIO 6: OLED SCL
 - GPIO 9: bouton (`INPUT_PULLUP`, actif a l'etat bas)
 - GPIO 8: LED
+- GPIO 4: bus OneWire pour DS18B20
 
 ## Structure effective du depot
 
@@ -155,12 +157,28 @@ Responsabilites:
 
 - Centraliser broches, timings, filtres, seuils profils, parametres WiFi/Web, et niveaux logs.
 
-### 6) Module utils
+### 6) Module temperature
+
+Fichiers:
+
+- `src/temperature_manager.h`
+- `src/temperature_manager.cpp`
+
+Responsabilites:
+
+- Detection automatique des sondes DS18B20 sur le bus OneWire GPIO 4.
+- Lecture periodique de la temperature avec fallback `N/A` si aucune valeur n'est disponible.
+- Persistance des adresses, noms et seuils IDEL/MAX par profil et par sonde.
+- Exposition JSON d'etat via `/api/temperature/scan` et `/api/history`.
+
+### 7) Module utils
 
 Fichiers:
 
 - `src/utils/logger.h`
 - `src/utils/logger.cpp`
+- `src/temperature_manager.cpp`
+- `src/temperature_manager.h`
 
 Responsabilites:
 
@@ -190,7 +208,8 @@ Responsabilites:
 5. Detection perte signal (`SIGNAL_LOST_MS = 800`).
 6. Ajout historique (`GRAPH_UPDATE_MS = 10000`).
 7. Gestion clignotement LED selon seuils.
-8. Rendu page OLED courante.
+8. Lecture/refresh des sondes DS18B20 et mise a jour de l'etat runtime.
+9. Rendu page OLED courante.
 
 ## Affichage OLED
 
@@ -200,7 +219,8 @@ Pages applicatives:
 2. `StatusFace`
 3. `Graph`
 4. `Details`
-5. `Profile`
+5. `Temperature`
+6. `Profile`
 
 Regles:
 
@@ -208,6 +228,7 @@ Regles:
 - Appui long (>= 800ms): retour `SimplePwm`.
 - Si WiFi non initialisé: ecran `WIFI - KO`.
 - Si signal PWM absent: ecran `PWM - KO`.
+- La page `Temperature` affiche les valeurs des sondes detectees sur tout l'ecran, avec `N/A` si aucune valeur n'est disponible.
 
 ## Web: routes et auth
 
@@ -230,6 +251,7 @@ Regles:
 - `GET /profile`
 - `POST /profile/apply`
 - `POST /profile/reset`
+- `GET /api/temperature/scan`
 - `GET /console`
 - `POST /console/settings`
 - `GET /assets/style.css`

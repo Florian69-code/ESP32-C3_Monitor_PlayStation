@@ -44,6 +44,9 @@ void drawDetails();
 // Affiche la page profil OLED.
 void drawProfilePage();
 
+// Affiche la page temperature avec les sondes detectees.
+void drawTemperaturePage();
+
 // Point d'entree principal du rendu.
 // Selectionne automatiquement la page ou l'ecran d'erreur a afficher.
 void drawCurrentPage();

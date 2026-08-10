@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <DallasTemperature.h>
 
 // === Profil console ===
 enum class ConsoleProfile : uint8_t {
@@ -21,6 +22,10 @@ struct ProfileThresholdPreset {
   float gameCoolMax;
   // Fin de zone GAME HOT.
   float gameHotMax;
+  // Seuil de temperature au repos.
+  float temperatureIdle;
+  // Seuil de temperature maximale.
+  float temperatureMax;
 };
 
 // === Seuils de statut de la vitesse du ventilateur ===
@@ -44,22 +49,39 @@ constexpr float STATUS_PS3F_IDLE_COOL_MAX = 11.0f; // Seuil max (%) de la zone I
 constexpr float STATUS_PS3F_GAME_COOL_MAX = 17.0f; // Seuil max (%) de la zone GAME COOL pour PS3 FAT.
 constexpr float STATUS_PS3F_GAME_HOT_MAX = 19.0f; // Seuil max (%) de la zone GAME HOT pour PS3 FAT.
 
-constexpr const char WEB_IDLE_COOL_MAX_DESCRIPTION[] =
-    "Seuil max de la zone IDLE: en dessous, le ventilateur est considere au repos.";
-constexpr const char WEB_GAME_COOL_MAX_DESCRIPTION[] =
-    "Seuil intermediaire de zone GAME: au-dessus, la chauffe devient soutenue.";
-constexpr const char WEB_GAME_HOT_MAX_DESCRIPTION[] =
-    "Seuil max de la zone GAME COOL: au-dessus, l'etat passe en GAME HOT.";
+// === Seuils de temperature ===
+constexpr float STATUS_PS5F_TEMPERATURE_IDLE = 50.0f;
+constexpr float STATUS_PS5F_TEMPERATURE_MAX = 90.0f;
+
+constexpr float STATUS_PS4P_TEMPERATURE_IDLE = 50.0f;
+constexpr float STATUS_PS4P_TEMPERATURE_MAX = 90.0f;
+
+constexpr float STATUS_PS3F_TEMPERATURE_IDLE = 50.0f;
+constexpr float STATUS_PS3F_TEMPERATURE_MAX = 90.0f;
+
+// === Identifiants et noms des sondes de temperature ===
+extern DeviceAddress SONDE1_ID;
+constexpr char SONDE1_NAME[] = "";
+extern DeviceAddress SONDE2_ID;
+constexpr char SONDE2_NAME[] = "";
+
+
+// === Descriptions des seuils pour l'interface Web ===
+constexpr const char WEB_IDLE_COOL_MAX_DESCRIPTION[] = "Seuil max de la zone IDLE: en dessous, le ventilateur est considere au repos.";
+constexpr const char WEB_GAME_COOL_MAX_DESCRIPTION[] = "Seuil intermediaire de zone GAME: au-dessus, la chauffe devient soutenue.";
+constexpr const char WEB_GAME_HOT_MAX_DESCRIPTION[] = "Seuil max de la zone GAME COOL: au-dessus, l'etat passe en GAME HOT.";
+constexpr const char WEB_TEMPERATURE_IDLE_DESCRIPTION[] = "Seuil de temperature au repos: en dessous, le systeme est considere normal.";
+constexpr const char WEB_TEMPERATURE_MAX_DESCRIPTION[] = "Seuil de temperature maximale: au-dessus, le systeme est considere en surchauffe.";
 
 inline ProfileThresholdPreset getDefaultProfileThresholdPreset(ConsoleProfile profile) {
   switch (profile) {
     case ConsoleProfile::PS4_PRO:
-      return {STATUS_PS4P_IDLE_COOL_MAX, STATUS_PS4P_GAME_COOL_MAX, STATUS_PS4P_GAME_HOT_MAX};
+      return {STATUS_PS4P_IDLE_COOL_MAX, STATUS_PS4P_GAME_COOL_MAX, STATUS_PS4P_GAME_HOT_MAX, STATUS_PS4P_TEMPERATURE_IDLE, STATUS_PS4P_TEMPERATURE_MAX};
     case ConsoleProfile::PS3_FAT:
-      return {STATUS_PS3F_IDLE_COOL_MAX, STATUS_PS3F_GAME_COOL_MAX, STATUS_PS3F_GAME_HOT_MAX};
+      return {STATUS_PS3F_IDLE_COOL_MAX, STATUS_PS3F_GAME_COOL_MAX, STATUS_PS3F_GAME_HOT_MAX, STATUS_PS3F_TEMPERATURE_IDLE, STATUS_PS3F_TEMPERATURE_MAX};
     case ConsoleProfile::PS5_FAT:
     default:
-      return {STATUS_PS5F_IDLE_COOL_MAX, STATUS_PS5F_GAME_COOL_MAX, STATUS_PS5F_GAME_HOT_MAX};
+      return {STATUS_PS5F_IDLE_COOL_MAX, STATUS_PS5F_GAME_COOL_MAX, STATUS_PS5F_GAME_HOT_MAX, STATUS_PS5F_TEMPERATURE_IDLE, STATUS_PS5F_TEMPERATURE_MAX};
   }
 }
 
@@ -67,3 +89,7 @@ inline ProfileThresholdPreset getDefaultProfileThresholdPreset(ConsoleProfile pr
 constexpr float THRESHOLD_STEP = 1.0f; // Pas de reglage lors des ajustements utilisateur.
 constexpr float THRESHOLD_MIN = 0.0f; // Borne basse autorisee pour un seuil (%).
 constexpr float THRESHOLD_MAX = 100.0f; // Borne haute autorisee pour un seuil (%).
+constexpr float TEMPERATURE_MIN = 0.0f; // Borne basse autorisee pour un seuil de temperature (°C).
+constexpr float TEMPERATURE_MAX = 120.0f; // Borne haute autorisee pour un seuil de temperature (°C).
+constexpr float TEMPERATURE_STEP = 1.0f; // Pas de reglage lors des ajustements utilisateur.
+constexpr int TEMPERATURE_REFRESH = 3; // Refresh de la sonde de temperature toutes les N secondes pour eviter que la sonde chauffe trop et que la valeur soit altérée.
