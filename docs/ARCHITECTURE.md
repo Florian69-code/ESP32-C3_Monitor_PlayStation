@@ -4,30 +4,35 @@ Ce document decrit l'implementation reelle du firmware a date, pour eviter les c
 
 ## Objectif
 
-L'ESP32-C3 lit un signal PWM de ventilateur console sur GPIO 2, calcule duty/frequence, affiche l'etat sur OLED 72x40, et expose une interface Web locale en mode point d'acces WiFi.
+L'ESP32-C3 WIFI OLED, lit par défaut, un signal PWM de ventilateur console SONY PLAYSTATION sur GPIO 2 et calcule duty/frequence.
+Un affichage simple est présent sur OLED 72x40.
+Elle expose une interface Web locale en mode point d'acces WiFi afin d'afficher plus d'informations et de pourvoir effectuer des changements de paramétrages.
+Il est possible d'y ajouter jusqu'a 2 sondes DS18B20 (TO-92) sur GPIO 4 avec pull-up 4.7k. Les informations des 2 sondes thermiques seront égalements présentes sur l'affichage OLED et via l'interface graphique.
 
 Consoles supportees par profil:
 
-- PS5 FAT
+- PS5 FAT (profil utilisé par défaut)
 - PS4 PRO
 - PS3 FAT
 
 ## Materiel
 
 - ESP32-C3
-- Ecran OLED I2C 72x40 (SSD1306)
-- 1 bouton de navigation
-- 1 LED de feedback thermique
-- 0, 1 ou 2 sondes DS18B20 (TO-92) sur GPIO 4 avec pull-up 4.7k si présentes
+  - WIFI 
+  - Ecran OLED I2C 72x40 (SSD1306)
+  - 1 bouton de navigation
+  - 1 LED de feedback thermique (en fonction des données du PWM)
+- 1 câble branché sur la prise PWM de la console et sur le GPIO 2
+- En option, 1 ou 2 sondes DS18B20 (TO-92) sur GPIO 4 avec pull-up 4.7k si présentes
 
 Broches par defaut:
 
 - GPIO 2: PWM input
+- GPIO 4: bus OneWire pour DS18B20 (en option)
 - GPIO 5: OLED SDA
 - GPIO 6: OLED SCL
-- GPIO 9: bouton (`INPUT_PULLUP`, actif a l'etat bas)
 - GPIO 8: LED
-- GPIO 4: bus OneWire pour DS18B20
+- GPIO 9: bouton (`INPUT_PULLUP`, actif a l'etat bas)
 
 ## Structure effective du depot
 
@@ -44,7 +49,14 @@ Broches par defaut:
     pages/profile.html
     pages/console.html
     pages/redirect.html
-  docs/ARCHITECTURE.md
+  docs/
+    ARCHITECTURE.md
+    3d/
+      oled042.3mf
+      oled042.stl
+      supportEsp32-c3Oled.3mf
+      supportEsp32-c3Oled.stl
+      supportEsp32-c3Oled.scad
   src/
     main.cpp
     config.h
@@ -90,7 +102,7 @@ Fichiers:
 
 Responsabilites:
 
-- Etat central (`AppState`): page courante, profil actif, valeurs PWM filtrees, historique, statuts WiFi/PWM, mode icone, niveaux logs Web.
+- Etat central (`AppState`): page courante, température, profil actif, valeurs PWM filtrees, historique, statuts WiFi/PWM, mode icone, niveaux logs Web.
 - Initialisation globale (`initializeApp`): debug serie, logger, bouton/LED, chargement Preferences, init OLED, init WiFi/AP, init WebServer, demarrage sampler PWM.
 - Boucle principale (`updateApp`): bouton, WiFi, HTTP, acquisition PWM, filtrage, historisation, rendu OLED.
 
