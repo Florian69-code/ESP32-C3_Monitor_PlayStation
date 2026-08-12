@@ -1,317 +1,175 @@
-# Architecture actuelle du projet
+# Architecture reelle du projet
 
-Ce document decrit l'implementation reelle du firmware a date, pour eviter les confusions entre cible de refacto et code effectivement deployable.
+Ce document decrit l'implementation actuellement presente dans le depot.
 
 ## Objectif
 
-L'ESP32-C3 WIFI OLED, lit par défaut, un signal PWM de ventilateur console SONY PLAYSTATION sur GPIO 2 et calcule duty/frequence.
-Un affichage simple est présent sur OLED 72x40.
-Elle expose une interface Web locale en mode point d'acces WiFi afin d'afficher plus d'informations et de pourvoir effectuer des changements de paramétrages.
-Il est possible d'y ajouter jusqu'a 2 sondes DS18B20 (TO-92) sur GPIO 4 avec pull-up 4.7k. Les informations des 2 sondes thermiques seront égalements présentes sur l'affichage OLED et via l'interface graphique.
+Le firmware s'execute sur un ESP32-C3 equipe d'un OLED SSD1306 72x40. Il mesure le signal PWM du ventilateur d'une console PlayStation, filtre le duty-cycle (cycle de service) et la frequence, affiche l'etat localement et expose une interface Web dans un point d'acces Wi-Fi.
 
-Consoles supportees par profil:
+Deux sondes DS18B20 peuvent etre ajoutees sur un bus OneWire. Leurs temperatures, noms, adresses et seuils sont accessibles depuis l'interface Web ainsi que depuis l' écran OLED avec moins d'informations.
+Les profils console disponibles sont:
 
-- PS5 FAT (profil utilisé par défaut)
-- PS4 PRO
-- PS3 FAT
+- PS5 FAT, profil par defaut;
+- PS4 PRO;
+- PS3 FAT.
 
-## Materiel
+## Materiel et broches
 
-- ESP32-C3
-  - WIFI 
-  - Ecran OLED I2C 72x40 (SSD1306)
-  - 1 bouton de navigation
-  - 1 LED de feedback thermique (en fonction des données du PWM)
-- 1 câble branché sur la prise PWM de la console et sur le GPIO 2
-- En option, 1 ou 2 sondes DS18B20 (TO-92) sur GPIO 4 avec pull-up 4.7k si présentes
+| Fonction | Broche | Implementation |
+| --- | ---: | --- |
+| Entree PWM ventilateur | GPIO 2 | Interruption sur chaque changement de niveau |
+| Bus OneWire DS18B20 | GPIO 4 | `INPUT_PULLUP`, jusqu'a 2 sondes |
+| OLED SDA | GPIO 5 | Bus I2C |
+| OLED SCL | GPIO 6 | Bus I2C |
+| LED thermique | GPIO 8 | Clignotement selon le seuil PWM chaud |
+| Bouton navigation | GPIO 9 | `INPUT_PULLUP`, actif a l'etat bas |
 
-Broches par defaut:
+Le signal applique a GPIO 2 doit respecter les niveaux electriques de l'ESP32-C3. Un signal 5 V ne doit pas etre branche directement sur une entree GPIO.
 
-- GPIO 2: PWM input
-- GPIO 4: bus OneWire pour DS18B20 (en option)
-- GPIO 5: OLED SDA
-- GPIO 6: OLED SCL
-- GPIO 8: LED
-- GPIO 9: bouton (`INPUT_PULLUP`, actif a l'etat bas)
-
-## Structure effective du depot
+## Arborescence compilee
 
 ```text
 .
   platformio.ini
+  LICENSE.txt
   ps5_fan_pwm_reader.ino
   README.md
   data/
     assets/style.css
-    pages/login.html
-    pages/home.html
-    pages/history.html
-    pages/profile.html
-    pages/console.html
-    pages/redirect.html
+    pages/{console,history,home,login,profile,redirect}.html
   docs/
     ARCHITECTURE.md
     3d/
-      oled042.3mf
-      oled042.stl
-      supportEsp32-c3Oled.3mf
-      supportEsp32-c3Oled.stl
-      supportEsp32-c3Oled.scad
+        oled042_stls.zip
+        oled042.3mf
+        supportEsp32-c3Oled.{3mf,scad,stl}
   src/
     main.cpp
     config.h
-    display_ui.h
-    display_ui.cpp
-    pwm_sampler.h
-    pwm_sampler.cpp
-    app/
-      app_state.h
-      app_state.cpp
-      app_logic.h
-      app_logic.cpp
-    config/
-      pins.h
-      profiles.h
-      defaults.h
-      log_config.h
-      web_config.h
-    network/
-      wifi_manager.h
-      wifi_manager.cpp
-      web_storage.h
-      web_storage.cpp
-      web_pages.h
-      web_pages.cpp
-      web_ui.h
-      web_ui.cpp
-    utils/
-      logger.h
-      logger.cpp
+    display_ui.{h,cpp}
+    pwm_sampler.{h,cpp}
+    temperature_manager.{h,cpp}
+    app/{app_state,app_logic}.{h,cpp}
+    config/{pins,profiles,defaults,log_config,web_config}.h
+    network/{wifi_manager,web_ui,web_pages,web_storage}.{h,cpp}
+    utils/logger.{h,cpp}
 ```
+
+`src/main.cpp` appelle `initializeApp()` une fois puis `updateApp()` a chaque iteration. Le fichier `.ino` est conserve comme entree Arduino historique; l'entree PlatformIO utilisee est `src/main.cpp`.
 
 ## Modules et responsabilites
 
-### 1) Module app
+### Application et etat
 
-Fichiers:
+`src/app/app_state.*` contient l'etat partage par la logique, l'OLED et le Web: page courante, profil, mesures PWM filtrees, maximum, historique, statuts Wi-Fi/PWM, seuils des trois profils, configuration des deux sondes et parametres du logger Web.
 
-- `src/app/app_state.h`
-- `src/app/app_state.cpp`
-- `src/app/app_logic.h`
-- `src/app/app_logic.cpp`
+`src/app/app_logic.*` orchestre le cycle de vie, le bouton, la persistance Preferences, l'acquisition PWM, le rafraichissement temperature, la LED et le serveur Web.
 
-Responsabilites:
+### Ecran OLED
 
-- Etat central (`AppState`): page courante, température, profil actif, valeurs PWM filtrees, historique, statuts WiFi/PWM, mode icone, niveaux logs Web.
-- Initialisation globale (`initializeApp`): debug serie, logger, bouton/LED, chargement Preferences, init OLED, init WiFi/AP, init WebServer, demarrage sampler PWM.
-- Boucle principale (`updateApp`): bouton, WiFi, HTTP, acquisition PWM, filtrage, historisation, rendu OLED.
+`src/display_ui.*` ne contient que le rendu OLED et les ecrans d'erreur. Les pages `DisplayPage` sont:
 
-### 2) Module display
+1. `SimplePwm`: duty-cycle en pourcentage;
+2. `StatusFace`: etat sous forme de texte ou d'icone;
+3. `Graph`: historique PWM et maximum;
+4. `Details`: PWM, frequence, seuils et Wi-Fi;
+5. `Temperature`: valeurs des sondes, ou `N/A`;
+6. `Profile`: profil console actif.
 
-Fichiers:
+Un appui court passe a la page suivante. Un appui long d'au moins 800 ms revient a `SimplePwm`. L'ecran de demarrage dure au maximum 5 secondes et peut etre interrompu.
 
-- `src/display_ui.h`
-- `src/display_ui.cpp`
+### Acquisition PWM
 
-Responsabilites:
+`src/pwm_sampler.*` mesure les durees hautes et basses dans une interruption `CHANGE`. `readAndReset()` capture les compteurs de facon atomique et produit `PwmSample`:
 
-- Rendu OLED uniquement.
-- Pages affichees: `SimplePwm`, `StatusFace`, `Graph`, `Details`, `Profile`.
-- Ecrans d'erreur: WiFi KO, PWM absent.
-- Lecture des seuils actifs via getters (`getActiveIdleCoolMax`, etc.).
+- au moins 10 periodes sont necessaires;
+- le temps total doit etre valide et superieur ou egal a 1000 microsecondes;
+- `dutyPercent = high / (high + low) * 100`;
+- `frequencyHz = periods / (totalUs / 1 000 000)`.
 
-### 3) Module sensors
+Les mesures valides sont filtrees avec 90 % de l'ancienne valeur et 10 % de la nouvelle. Apres 800 ms sans echantillon valide, le signal est perdu et les valeurs courantes sont remises a zero.
 
-Fichiers:
+### Temperature
 
-- `src/pwm_sampler.h`
-- `src/pwm_sampler.cpp`
+`src/temperature_manager.*` utilise OneWire et DallasTemperature: detection au demarrage et sur demande, maximum de deux sondes, resolution 12 bits, lecture toutes les 2 secondes et valeur `N/A` si indisponible. La page Profil permet de selectionner une adresse, un nom et des seuils IDEL/MAX pour chaque sonde; ces reglages sont geres par profil dans Preferences.
 
-Responsabilites:
+### Reseau et interface Web
 
-- Mesure PWM via interruption `CHANGE`.
-- Accumulation durees high/low, nombre de periodes.
-- Production echantillon `PwmSample { valid, dutyPercent, frequencyHz }`.
+`src/network/wifi_manager.*` configure uniquement un point d'acces (`WIFI_AP`) a l'adresse `192.168.4.1`; il ne gere pas de connexion a un reseau externe.
 
-### 4) Module network
+`web_ui.*` declare les routes, verifie l'authentification et applique les formulaires. `web_pages.*` charge les templates et injecte l'etat. `web_storage.*` monte LittleFS et sert les fichiers statiques; en cas d'indisponibilite, les pages HTML et CSS de secours sont generees en C++.
 
-Fichiers:
+`src/utils/logger.*` conserve un buffer circulaire en RAM avec les niveaux `TRACE`, `DEBUG`, `INFO`, `WARN` et `ERROR`. Les logs sont rendus dans `/console`.
 
-- `src/network/wifi_manager.h`
-- `src/network/wifi_manager.cpp`
-- `src/network/web_ui.h`
-- `src/network/web_ui.cpp`
-- `src/network/web_pages.h`
-- `src/network/web_pages.cpp`
-- `src/network/web_storage.h`
-- `src/network/web_storage.cpp`
+## Cycle d'execution
 
-Responsabilites:
+### Initialisation
 
-- Creation AP WiFi local (`WIFI_AP`, IP 192.168.4.1).
-- Declaration des routes HTTP.
-- Authentification login par mot de passe + cookie de session.
-- Rendu des pages via templates LittleFS, avec fallback HTML/CSS compile.
-- Exposition API JSON de l'historique PWM (`/api/history`).
+1. Initialisation serie et logger.
+2. Configuration du bouton et de la LED.
+3. Ouverture de Preferences dans le namespace `ps5fan`.
+4. Chargement de la page, du profil, des seuils, des sondes et des parametres de logs.
+5. Initialisation OLED et ecran de demarrage.
+6. Creation du point d'acces Wi-Fi.
+7. Montage LittleFS, declaration des routes et demarrage HTTP.
+8. Demarrage du sampler PWM et du gestionnaire DS18B20.
 
-### 5) Module config
+### Boucle principale
 
-Fichiers:
+1. Lecture du bouton et gestion des appuis court/long.
+2. Maintenance Wi-Fi et traitement HTTP.
+3. Tick applicatif toutes les 100 ms.
+4. Lecture, validation et filtrage du PWM.
+5. Detection de perte du signal apres 800 ms.
+6. Ajout d'un point dans l'historique toutes les 10 secondes si le signal est valide.
+7. Mise a jour des temperatures toutes les 2 secondes.
+8. Gestion de la LED thermique et rendu OLED.
 
-- `src/config/pins.h`
-- `src/config/profiles.h`
-- `src/config/defaults.h`
-- `src/config/log_config.h`
-- `src/config/web_config.h`
-- `src/config.h` (agrégateur)
+## Interface Web
 
-Responsabilites:
+### Parametres par defaut
 
-- Centraliser broches, timings, filtres, seuils profils, parametres WiFi/Web, et niveaux logs.
-
-### 6) Module temperature
-
-Fichiers:
-
-- `src/temperature_manager.h`
-- `src/temperature_manager.cpp`
-
-Responsabilites:
-
-- Detection automatique des sondes DS18B20 sur le bus OneWire GPIO 4.
-- Lecture periodique de la temperature avec fallback `N/A` si aucune valeur n'est disponible.
-- Persistance des adresses, noms et seuils IDEL/MAX par profil et par sonde.
-- Exposition JSON d'etat via `/api/temperature/scan` et `/api/history`.
-
-### 7) Module utils
-
-Fichiers:
-
-- `src/utils/logger.h`
-- `src/utils/logger.cpp`
-- `src/temperature_manager.cpp`
-- `src/temperature_manager.h`
-
-Responsabilites:
-
-- Logger central avec buffer circulaire en memoire.
-- Niveaux `TRACE` a `ERROR`.
-- Exposition HTML des logs pour la page `/console`.
-
-## Flux d'execution
-
-### Setup
-
-1. Init serie (si active), init logger.
-2. Init bouton + LED.
-3. Ouverture `Preferences` namespace `ps5fan`.
-4. Chargement des reglages persistants (page, profil, seuils, icones, logs).
-5. Init OLED + ecran de boot (5s max, interrompable au bouton).
-6. Init WiFi AP.
-7. Init routes Web + `WebServer.begin()`.
-8. Init capteur PWM.
-
-### Loop
-
-1. Gestion bouton (appui court/long).
-2. Maintenance WiFi + `webServer.handleClient()`.
-3. Cadencement affichage (`DISPLAY_REFRESH_MS = 100`).
-4. Lecture et filtrage PWM.
-5. Detection perte signal (`SIGNAL_LOST_MS = 800`).
-6. Ajout historique (`GRAPH_UPDATE_MS = 10000`).
-7. Gestion clignotement LED selon seuils.
-8. Lecture/refresh des sondes DS18B20 et mise a jour de l'etat runtime.
-9. Rendu page OLED courante.
-
-## Affichage OLED
-
-Pages applicatives:
-
-1. `SimplePwm`
-2. `StatusFace`
-3. `Graph`
-4. `Details`
-5. `Temperature`
-6. `Profile`
-
-Regles:
-
-- Appui court: page suivante.
-- Appui long (>= 800ms): retour `SimplePwm`.
-- Si WiFi non initialisé: ecran `WIFI - KO`.
-- Si signal PWM absent: ecran `PWM - KO`.
-- La page `Temperature` affiche les valeurs des sondes detectees sur tout l'ecran, avec `N/A` si aucune valeur n'est disponible.
-
-## Web: routes et auth
-
-### Parametres reseau
-
-- SSID: `PlastationFan`
-- Password AP: `Pl@ystati0nf@n`
-- URL: `http://192.168.4.1`
-- Port: `80`
-- Password login: `S0ny`
-- Cookie session: `ps-fan_auth=authorized`
+- SSID AP: `PlastationFan`;
+- mot de passe AP: `Pl@ystati0nf@n`;
+- URL: `http://192.168.4.1`;
+- port HTTP: `80`;
+- mot de passe Web: `S0ny`;
+- cookie: `ps-fan_auth=authorized`.
 
 ### Routes
 
-- `GET /`
-- `GET /login`
-- `POST /login`
-- `GET /history`
-- `GET /api/history`
-- `GET /profile`
-- `POST /profile/apply`
-- `POST /profile/reset`
-- `GET /api/temperature/scan`
-- `GET /console`
-- `POST /console/settings`
-- `GET /assets/style.css`
-- `GET /favicon.ico`
+| Methode | Route | Role |
+| --- | --- | --- |
+| GET | `/` | Login si non authentifie, accueil sinon |
+| GET/POST | `/login` | Formulaire et verification du mot de passe |
+| GET | `/history` | Historique PWM |
+| GET | `/api/history` | PWM courant, maximum, frequence, historique et temperatures en JSON |
+| GET | `/api/temperature/scan` | Detection et JSON des sondes DS18B20 |
+| GET | `/profile` | Profils, seuils et sondes |
+| POST | `/profile/apply` | Sauvegarde puis redemarrage |
+| GET | `/profile/apply` | Redirection de compatibilite vers `/profile` |
+| POST | `/profile/reset` | Remise a zero puis redemarrage |
+| GET | `/profile/reset` | Redirection de compatibilite vers `/profile` |
+| GET | `/console` | Logs et parametres |
+| POST | `/console/settings` | Sauvegarde des logs puis redemarrage |
+| GET | `/assets/style.css` | CSS LittleFS ou fallback compile |
+| GET | `/favicon.ico` | Reponse vide `204` |
 
-Toutes les pages sauf login exigent auth cookie (sinon redirection HTTP 303 vers `/login`).
+Toutes les routes fonctionnelles sauf la connexion exigent le cookie d'authentification. Les API renvoient `401`; les pages redirigent vers `/login`.
 
-## Persistance (NVS / Preferences)
+## Persistance NVS
 
-Namespace: `ps5fan`.
+Namespace Preferences: `ps5fan`.
 
-Cles utilisees:
+Les cles principales sont `page`, `console_profile`, `icon_mode`, `thr_offset`, `log_level`, `log_refresh`, les seuils PWM `p5_*`, `p4_*`, `p3_*`, les seuils temperature `*_t_idle` et `*_t_max`, ainsi que les adresses, noms et seuils des sondes (`*_s1_*` et `*_s2_*`).
 
-- `page`
-- `console_profile`
-- `threshold_offset`
-- `icon_mode`
-- `log_level`
-- `log_refresh`
-- `p5_i_cool`, `p5_i_hot`, `p5_g_cool`
-- `p4_i_cool`, `p4_i_hot`, `p4_g_cool`
-- `p3_i_cool`, `p3_i_hot`, `p3_g_cool`
+Les cles ESP32 sont limitees a 15 caracteres: l'offset utilise `thr_offset`, et non l'ancien nom `threshold_offset`.
 
-## LittleFS et templates
+La remise a zero reecrit les seuils par defaut des trois profils, supprime les reglages de sondes, remet l'etat runtime a zero et redemarre l'ESP32-C3.
 
-Fichiers servis:
+## Configuration et build
 
-- `/assets/style.css`
-- `/pages/login.html`
-- `/pages/home.html`
-- `/pages/history.html`
-- `/pages/profile.html`
-- `/pages/console.html`
-- `/pages/redirect.html`
-
-Si LittleFS ne monte pas, le firmware bascule sur des pages fallback generees en C++ (`web_pages.cpp`).
-
-## Ecart entre cible historique et implementation actuelle
-
-Points importants:
-
-- Le projet est deja modulaire (app/network/config/utils), mais certains dossiers "cible" n'existent pas encore (`display/`, `sensors/`, `storage/` en sous-repertoires dedies).
-- Le module de persistance n'est pas isole dans un composant `storage`; `Preferences` est utilise directement dans `app_logic.cpp` et `web_ui.cpp`.
-- L'interface Web complete est deja presente (login, profil, historique, console), donc ce n'est plus une etape future.
-
-## Build et verification
-
-Commandes recommandees:
+Les broches sont dans `src/config/pins.h`, les timings et ratios dans `src/config/defaults.h`, les seuils dans `src/config/profiles.h` et les parametres Web dans `src/config/web_config.h`.
 
 ```bash
 platformio run
@@ -320,13 +178,18 @@ platformio run -t upload
 platformio run -t uploadfs
 ```
 
-Verification minimale apres changement de `src/` ou `data/`:
+Sous Windows, si PlatformIO n'est pas dans le PATH:
 
-1. Build firmware.
-2. Build filesystem LittleFS.
-3. Upload firmware + filesystem.
-4. Test manuel login, menu, historique, profil, console.
+```powershell
+& "C:\Users\User\.platformio\penv\Scripts\platformio.exe" run
+& "C:\Users\User\.platformio\penv\Scripts\platformio.exe" run -t buildfs
+```
 
-## Conclusion
+Apres une modification de `data/`, reconstruire et televerser LittleFS en plus du firmware.
 
-L'architecture actuelle est exploitable, modulaire et cohérente avec l'objectif du projet. Le prochain gain de maintenabilite viendra surtout de l'isolation de la persistance dans un module dedie, puis du raffinement des conventions de separation display/sensor/storage.
+## Limites connues
+
+- Un seul environnement PlatformIO est defini et aucune suite de tests native automatisee n'est fournie.
+- L'authentification repose sur un mot de passe compile et un cookie simple: elle est adaptee a un reseau local isole, pas a Internet.
+- Les logs sont conserves en RAM et sont perdus au redemarrage.
+- Les sondes sont detectees au demarrage ou a la demande et lues periodiquement.
