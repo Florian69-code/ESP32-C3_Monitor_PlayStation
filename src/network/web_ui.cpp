@@ -288,6 +288,42 @@ String applyConsoleSettings(WebServer& server) {
   return String("Parametres des logs sauvegardes. Redemarrage de l'ESP32-C3...");
 }
 
+// Construit l'etat courant des sondes de temperature pour le Web.
+String buildTemperatureStatusJson() {
+  auto& state = getAppState();
+  String payload;
+  payload.reserve(384);
+  payload += "{";
+
+  for (uint8_t i = 0; i < 2; ++i) {
+    if (i > 0) {
+      payload += ",";
+    }
+
+    payload += "\"";
+    payload += String(i);
+    payload += "\":{";
+    payload += "\"address\":\"";
+    payload += state.sensorConfig[i].address;
+    payload += "\",\"name\":\"";
+    payload += state.sensorConfig[i].name;
+    payload += "\",\"enabled\":";
+    payload += state.sensorConfig[i].enabled ? "true" : "false";
+    payload += ",\"detected\":";
+    payload += state.sensorConfig[i].detected ? "true" : "false";
+    payload += ",\"temperature\":";
+    if (isnan(state.sensorConfig[i].currentTemperature)) {
+      payload += "null";
+    } else {
+      payload += String(state.sensorConfig[i].currentTemperature, 1);
+    }
+    payload += "}";
+  }
+
+  payload += "}";
+  return payload;
+}
+
 // Remise a zero complete des reglages profil (NVS) et de l'etat runtime associe.
 bool resetProfileSettings() {
   const bool persistedResetOk = resetProfilePageSettingsToDefaults();
@@ -475,6 +511,18 @@ void web_ui::initializeRoutes(WebServer& server) {
     server.send(200, "application/json", temperature_manager::getDetectedSensorsJson());
   });
 
+  server.on("/api/temperature/status", HTTP_GET, [&server]() {
+    logger::debugf("GET /api/temperature/status - cookie header='%s'", server.header("Cookie").c_str());
+    if (!isAuthorized(server)) {
+      server.sendHeader("Cache-Control", "no-store");
+      server.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+      return;
+    }
+
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", buildTemperatureStatusJson());
+  });
+
   server.on("/api/history", HTTP_GET, [&server]() {
     logger::debugf("GET /api/history - cookie header='%s'", server.header("Cookie").c_str());
     if (!isAuthorized(server)) {
@@ -553,7 +601,7 @@ void web_ui::initializeRoutes(WebServer& server) {
     server.sendHeader("Cache-Control", "no-store");
     server.send(200, "text/html", web_pages::getProfilePage(getAppState(), statusMessage));
     if (!statusMessage.startsWith("ERR:")) {
-      delay(300);
+      delay(1000);
       ESP.restart();
     }
   });
@@ -587,7 +635,7 @@ void web_ui::initializeRoutes(WebServer& server) {
 
     // Redirige vers /profile pour eviter un futur refresh en GET /profile/reset (404).
     redirectTo(server, "/profile");
-    delay(300);
+    delay(1000);
     ESP.restart();
   });
 

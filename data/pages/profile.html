@@ -55,7 +55,14 @@
         </section>
 
         <section class="section">
-          <h3>3. Remise a zero</h3>
+          <h3>3. Graphique des temperatures</h3>
+          <p class="inline-help">Le graphe affiche les temperatures des sondes 1 et 2 au fil du temps, si elles sont disponibles.</p>
+          <canvas id="temperatureChart" width="900" height="320" style="width:100%;height:auto;display:block;"></canvas>
+          <p class="inline-help" id="temperatureChartStatus">En attente des donnees des sondes...</p>
+        </section>
+
+        <section class="section">
+          <h3>4. Remise a zero</h3>
           <p>Reinitialise la configuration sauvegardee, puis redemarre l'ESP32-C3.</p>
           <form method="post" action="/profile/reset" onsubmit="return confirm('Confirmer la remise a zero ? Cette action est irreversible.');">
             <div class="btn-row">
@@ -72,6 +79,16 @@
     const coolInput = document.getElementById('game_cool_max');
     const hotInput = document.getElementById('game_hot_max');
     const thresholdsByProfile = {{PROFILE_THRESHOLDS_JSON}};
+    const sensor1Select = document.getElementById('sensor1_address');
+    const sensor2Select = document.getElementById('sensor2_address');
+    const detectSensorsBtn = document.getElementById('detectSensorsBtn');
+    const sensorStatus = document.getElementById('sensorStatus');
+    const temperatureCanvas = document.getElementById('temperatureChart');
+    const temperatureChartStatus = document.getElementById('temperatureChartStatus');
+    const temperatureCtx = temperatureCanvas ? temperatureCanvas.getContext('2d') : null;
+    const temperatureSessionStartMs = Date.now();
+    const temperatureSamples = [];
+    let temperatureRefreshInFlight = false;
 
     function applyThresholdsForProfile(profileValue) {
       const thresholds = thresholdsByProfile[String(profileValue)];
@@ -87,6 +104,211 @@
     if (profileSelect && idleInput && coolInput && hotInput) {
       profileSelect.addEventListener('change', () => applyThresholdsForProfile(profileSelect.value));
     }
+
+    function getTemperatureElapsedSeconds() {
+      return Math.max(0, Math.floor((Date.now() - temperatureSessionStartMs) / 1000));
+    }
+
+    function upsertTemperatureSample(second, sensor1Value, sensor2Value) {
+      const lastSample = temperatureSamples[temperatureSamples.length - 1];
+      if (lastSample && lastSample.second === second) {
+        lastSample.sensor1 = sensor1Value;
+        lastSample.sensor2 = sensor2Value;
+        return;
+      }
+
+      temperatureSamples.push({ second, sensor1: sensor1Value, sensor2: sensor2Value });
+    }
+
+    function formatTemperature(value) {
+      return Number.isFinite(value) ? `${value.toFixed(1)} °C` : 'N/A';
+    }
+
+    function parseTemperatureValue(value) {
+      return value === null || value === undefined || value === '' ? Number.NaN : Number(value);
+    }
+
+    function resizeCanvasToDisplaySize() {
+      if (!temperatureCanvas) {
+        return;
+      }
+      
+      // Gère le DPI awareness pour les écrans haute résolution
+      const dpr = window.devicePixelRatio || 1;
+      const rect = temperatureCanvas.getBoundingClientRect();
+      
+      // Ne redimensionne que si nécessaire
+      const newWidth = Math.round(rect.width * dpr);
+      const newHeight = Math.round(rect.height * dpr);
+      
+      if (temperatureCanvas.width !== newWidth || temperatureCanvas.height !== newHeight) {
+        temperatureCanvas.width = newWidth;
+        temperatureCanvas.height = newHeight;
+        
+        // Après le redimensionnement, réappliquer le scale
+        if (temperatureCtx) {
+          temperatureCtx.scale(dpr, dpr);
+          // Redessine le graphique après redimensionnement
+          drawTemperatureChart();
+        }
+      }
+    }
+
+    function drawTemperatureChart() {
+      if (!temperatureCtx || !temperatureCanvas) {
+        return;
+      }
+
+      const width = temperatureCanvas.width;
+      const height = temperatureCanvas.height;
+      temperatureCtx.clearRect(0, 0, width, height);
+      temperatureCtx.fillStyle = 'rgba(3, 8, 15, 0.85)';
+      temperatureCtx.fillRect(0, 0, width, height);
+
+      const left = 56;
+      const right = width - 14;
+      const top = 16;
+      const bottom = height - 36;
+      const graphWidth = right - left;
+      const graphHeight = bottom - top;
+      const visibleStart = Math.max(0, getTemperatureElapsedSeconds() - 600);
+      const visibleEnd = Math.max(1, getTemperatureElapsedSeconds());
+      const visibleSamples = temperatureSamples.filter((sample) => sample.second >= visibleStart && sample.second <= visibleEnd);
+      const values = [];
+      for (const sample of visibleSamples) {
+        if (Number.isFinite(sample.sensor1)) {
+          values.push(sample.sensor1);
+        }
+        if (Number.isFinite(sample.sensor2)) {
+          values.push(sample.sensor2);
+        }
+      }
+
+      if (values.length === 0) {
+        temperatureCtx.fillStyle = '#a2b4cd';
+        temperatureCtx.font = '16px sans-serif';
+        temperatureCtx.fillText('Aucune temperature disponible', left, top + 24);
+        return;
+      }
+
+      let minValue = Math.floor(Math.min(...values) - 1);
+      let maxValue = Math.ceil(Math.max(...values) + 1);
+      if (minValue === maxValue) {
+        minValue -= 1;
+        maxValue += 1;
+      }
+
+      const tickStep = 2;
+      temperatureCtx.strokeStyle = 'rgba(135, 164, 205, 0.24)';
+      temperatureCtx.lineWidth = 1;
+      temperatureCtx.fillStyle = '#a2b4cd';
+      temperatureCtx.font = '12px monospace';
+
+      for (let tickValue = minValue; tickValue <= maxValue; tickValue += tickStep) {
+        const ratio = (tickValue - minValue) / Math.max(1, maxValue - minValue);
+        const y = bottom - ratio * graphHeight;
+        temperatureCtx.beginPath();
+        temperatureCtx.moveTo(left, y);
+        temperatureCtx.lineTo(right, y);
+        temperatureCtx.stroke();
+        temperatureCtx.fillText(`${tickValue}°`, 6, y + 4);
+      }
+
+      const spanSeconds = Math.max(1, visibleEnd - visibleStart);
+      const drawSeries = (key, color) => {
+        temperatureCtx.strokeStyle = color;
+        temperatureCtx.lineWidth = 2;
+        temperatureCtx.beginPath();
+        let started = false;
+
+        for (const sample of visibleSamples) {
+          const value = sample[key];
+          if (!Number.isFinite(value)) {
+            started = false;
+            continue;
+          }
+
+          const clampedValue = Math.max(minValue, Math.min(maxValue, value));
+          const x = left + ((sample.second - visibleStart) / spanSeconds) * graphWidth;
+          const y = bottom - ((clampedValue - minValue) / Math.max(1, maxValue - minValue)) * graphHeight;
+          if (!started) {
+            temperatureCtx.moveTo(x, y);
+            started = true;
+          } else {
+            temperatureCtx.lineTo(x, y);
+          }
+        }
+
+        temperatureCtx.stroke();
+      };
+
+      drawSeries('sensor1', '#4ad2ff');
+      drawSeries('sensor2', '#8dffb2');
+
+      temperatureCtx.fillStyle = '#4ad2ff';
+      temperatureCtx.fillRect(left, 10, 10, 10);
+      temperatureCtx.fillStyle = '#a2b4cd';
+      temperatureCtx.fillText('Sonde 1', left + 16, 19);
+      temperatureCtx.fillStyle = '#8dffb2';
+      temperatureCtx.fillRect(left + 92, 10, 10, 10);
+      temperatureCtx.fillStyle = '#a2b4cd';
+      temperatureCtx.fillText('Sonde 2', left + 108, 19);
+      temperatureCtx.fillText(`Fenetre: ${Math.max(0, Math.floor(visibleStart))}s -> ${Math.max(0, Math.floor(visibleEnd))}s`, left, height - 18);
+    }
+
+    async function refreshTemperatures() {
+      if (!temperatureCtx || temperatureRefreshInFlight) {
+        return;
+      }
+
+      temperatureRefreshInFlight = true;
+      try {
+        const response = await fetch('/api/temperature/status', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const sensor1 = payload['0'] || {};
+        const sensor2 = payload['1'] || {};
+        const sensor1Temperature = parseTemperatureValue(sensor1.temperature);
+        const sensor2Temperature = parseTemperatureValue(sensor2.temperature);
+
+        // Affiche le statut avec des infos supplémentaires
+        const statusParts = [];
+        if (Number.isFinite(sensor1Temperature)) {
+          statusParts.push(`Sonde 1: ${formatTemperature(sensor1Temperature)}`);
+        } else {
+          statusParts.push(`Sonde 1: N/A`);
+        }
+        if (Number.isFinite(sensor2Temperature)) {
+          statusParts.push(`Sonde 2: ${formatTemperature(sensor2Temperature)}`);
+        } else {
+          statusParts.push(`Sonde 2: N/A`);
+        }
+        temperatureChartStatus.textContent = statusParts.join(' | ') + ` (${temperatureSamples.length} echantillons)`;
+        
+        upsertTemperatureSample(getTemperatureElapsedSeconds(), sensor1Temperature, sensor2Temperature);
+        drawTemperatureChart();
+      } catch (error) {
+        if (temperatureChartStatus) {
+          temperatureChartStatus.textContent = `Erreur de lecture des temperatures: ${error.message}`;
+        }
+        console.error('[Temperature Graph Error]', error);
+      } finally {
+        temperatureRefreshInFlight = false;
+      }
+    }
+
+    refreshTemperatures();
+    
+    // Redimensionner le canvas au chargement et en cas de changement de fenêtre
+    if (temperatureCanvas) {
+      resizeCanvasToDisplaySize();
+      window.addEventListener('resize', resizeCanvasToDisplaySize);
+    }
+    
+    setInterval(refreshTemperatures, 2000);
   </script>
 </body>
 </html>

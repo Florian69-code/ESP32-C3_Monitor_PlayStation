@@ -35,6 +35,11 @@
         togglePassword.textContent = isHidden ? 'Masquer' : 'Afficher';
       });
     }
+    
+    // Rafraîchissement automatique de la page toutes les 10 secondes
+    const refreshInterval = setInterval(() => {
+      location.reload();
+    }, 10000);
   </script>
 </body>
 </html>

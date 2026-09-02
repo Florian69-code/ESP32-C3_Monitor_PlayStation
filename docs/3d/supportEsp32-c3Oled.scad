@@ -3,23 +3,24 @@
 // ====================================================
 
 // --- PARAMÈTRES DU BOÎTIER ---
-boitier_largeur = 32; // Largeur du boîtier (mm)
-boitier_epaisseur = 16; // Épaisseur du boîtier (mm)
+boitier_largeur = 28; // Largeur du boîtier (mm)
+boitier_epaisseur = 8; // Épaisseur du boîtier (mm)
 
 // --- PARAMÈTRES DU PASSAGE USB-C ---
 largeur_prise_usb = 18; // Largeur d'ouverture USB
-hauteur_passage_usb = 30;// Espace sous le boîtier
+hauteur_passage_usb = 40;// Espace sous le boîtier
 
 // --- PARAMÈTRES DU SUPPORT ET PIEDS ---
 marge = 1.0; // Jeu d'insertion
-epaisseur_paroi = 4.0; // Épaisseur des parois
-marge_socle = 12; // Débord des pieds pour la stabilité
+epaisseur_paroi = 3.0; // Épaisseur des parois
+marge_socle = 4; // Débord des pieds pour la stabilité
 
 // --- PARAMÈTRES DES CROCHETS ---
-section_crochet = 5; // Section (5x5mm)
-branche_courte = 15; // Longueur insérée
-branche_longue = 28; // Longueur d'accroche
+section_crochet = 3; // Section (4x4mm)
+branche_courte = (epaisseur_paroi*2) + 4; // Longueur insérée
+branche_longue = 26; // Longueur d'accroche
 jeu = 0.3; // Tolérance d'assemblage
+position_depart_trou_crochet = 13;
 
 $fn = 40;
 
@@ -31,8 +32,8 @@ $fn = 40;
 support_esp32_simplifie();
 
 // 2. Les 2 crochets à côté
-translate([40, 0, 0]) equerre_simple();
-translate([40, 25, 0]) equerre_simple();
+translate([40, 0, 0]) piece_en_u();
+translate([40, 25, 0]) piece_en_u();
 
 
 // ====================================================
@@ -53,9 +54,12 @@ module support_esp32_simplifie() {
             translate([-l_ext/2, -e_ext/2, 0])
                 cube([l_ext, e_ext, h_totale]);
 
-            // 4 Pieds simples intégrés aux 4 coins inférieurs
+            // 2 Pieds simples
             translate([-(l_ext + marge_socle)/2, -(e_ext + marge_socle)/2, 0])
-                cube([l_ext + marge_socle, e_ext + marge_socle, 4]);
+                cube([10.5, e_ext + marge_socle, 4]);
+            
+            translate([9, -(e_ext + marge_socle)/2, 0])
+                cube([10.5, e_ext + marge_socle, 4]);
         }
 
         // --- 1. LOGEMENT INTERNE ESP32 ---
@@ -69,23 +73,38 @@ module support_esp32_simplifie() {
         // --- 3. DÉCOUPE TOTALEMENT VIDE USB-C (TRAVERSE DE HAUT EN BAS) ---
         // Évide tout le centre jusqu'au sol (0 en Z)
         translate([-largeur_prise_usb/2, -e_ext/2 - 0.1, -0.1])
-            cube([largeur_prise_usb, e_ext + 0.2, hauteur_passage_usb + 0.1]);
+            cube([largeur_prise_usb, e_ext + 0.2, hauteur_passage_usb + 0.2]);
 
-        // --- 4. TROU HAUT / DROITE (Z = 45mm, X = +7mm) ---
-        translate([9, e_ext/2 + 0.1, 50])
+        // --- 4. TROU HAUT / DROITE ---
+        translate([position_depart_trou_crochet, e_ext/2 + 0.1, 50])
             trou_crochet();
 
-        // --- 5. TROU BAS / GAUCHE (Z = 20mm, X = -7mm) ---
-        translate([-9, e_ext/2 + 0.1, 35])
+        // --- 5. TROU HAUT / GAUCHE ---
+        translate([position_depart_trou_crochet-branche_longue, e_ext/2 + 0.1, 50])
+            trou_crochet();
+        
+        // --- 6. TROU BAS / DROITE ---
+        translate([position_depart_trou_crochet, e_ext/2 + 0.1, 10])
+            trou_crochet();
+        
+        // --- 7. TROU BAS / GAUCHE ---
+        translate([position_depart_trou_crochet-branche_longue, e_ext/2 + 0.1, 10])
             trou_crochet();
     }
 }
 
-module equerre_simple() {
+module piece_en_u() {
     union() {
+        // 1. Première branche courte (votre premier bloc)
         cube([section_crochet, branche_courte, section_crochet]);
+        
+        // 2. Branche longue (la base du U)
         translate([0, branche_courte - section_crochet, 0])
-            cube([branche_longue, section_crochet, section_crochet]);
+            cube([branche_longue, section_crochet, section_crochet]);    
+        
+        // 3. Deuxième branche courte (le retour pour former le U)
+        translate([branche_longue - section_crochet, 0, 0])
+            cube([section_crochet, branche_courte, section_crochet]);
     }
 }
 

@@ -54,10 +54,9 @@ void wifi_manager::updateWifi() {
     return;
   }
 
-  const uint8_t stationCount = WiFi.softAPgetStationNum();
-  if (stationCount > 0) {
-      logger::tracef("[WiFi] station connected, count=%d", stationCount);
-  }
+  // Pas de log trace pour ne pas polluer les logs
+  // const uint8_t stationCount = WiFi.softAPgetStationNum();
+  // Debug uniquement si besoin : logger::debugf("[WiFi] station connected, count=%d", stationCount);
 }
 
 bool wifi_manager::isConnected() {

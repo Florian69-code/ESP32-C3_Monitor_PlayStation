@@ -52,6 +52,8 @@ void readTemperatures() {
     return;
   }
 
+  logger::debugf("[TEMP] readTemperatures() - discoveredCount=%u", discoveredCount);
+  
   auto& state = getAppState();
   sensors.requestTemperatures();
   delay(20);
@@ -62,6 +64,7 @@ void readTemperatures() {
       discoveredTemperatures[i] = value;
       state.sensorConfig[i].currentTemperature = value;
       state.sensorConfig[i].detected = true;
+      logger::tracef("[TEMP] sensor %u read successfully: %.1fC", i + 1, value);
     } else {
       discoveredTemperatures[i] = NAN;
       state.sensorConfig[i].currentTemperature = NAN;
@@ -78,19 +81,37 @@ void readTemperatures() {
 
 void discoverSensors() {
   discoveredCount = 0;
-  sensors.begin();
+  
+  logger::debugf("[TEMP] discoverSensors() starting - SONDES_PIN=%u", SONDES_PIN);
+  
+  // When rescanning, reconfigure the GPIO and reinitialize the bus
+  if (initialized) {
+    logger::trace("[TEMP] rescanning: reconfiguring GPIO pin as INPUT_PULLUP");
+    pinMode(SONDES_PIN, INPUT_PULLUP);
+    delay(50);
+    
+    logger::trace("[TEMP] rescanning: calling sensors.begin() for re-initialization");
+    sensors.begin();
+    delay(100);
+  }
+  
   sensors.setWaitForConversion(false);
   sensors.setResolution(12);
+  logger::trace("[TEMP] sensors configuration (waitForConversion=false, resolution=12) applied");
 
   const uint8_t sensorCount = sensors.getDeviceCount();
+  logger::debugf("[TEMP] sensors.getDeviceCount() returned: %u", sensorCount);
   logger::infof("[TEMP] discovered %u devices on pin %u", sensorCount, SONDES_PIN);
 
   if (sensorCount == 0) {
     logger::warn("[TEMP] no DS18B20 device detected");
+    logger::debugf("[TEMP] GPIO level (1=HIGH/idle, 0=LOW): %d", digitalRead(SONDES_PIN));
     return;
   }
 
   for (uint8_t i = 0; i < min(sensorCount, kMaxSensors); ++i) {
+    logger::debugf("[TEMP] attempting to read address for sensor index %u", i);
+    
     if (!sensors.getAddress(discoveredAddresses[i], i)) {
       logger::warnf("[TEMP] failed to read address for sensor %u", i + 1);
       continue;
@@ -102,6 +123,7 @@ void discoverSensors() {
     }
 
     discoveredCount = i + 1;
+    logger::debugf("[TEMP] sensor %u successfully read with address=%s", i + 1, deviceAddressToString(discoveredAddresses[i]).c_str());
     logger::infof("[TEMP] sensor %u address=%s", i + 1, deviceAddressToString(discoveredAddresses[i]).c_str());
   }
 
@@ -200,24 +222,39 @@ void setCurrentProfileSensorConfig(ConsoleProfile profile) {
 }  // namespace
 
 void temperature_manager::initialize() {
+  logger::debugf("[TEMP] initialize() starting - setting up OneWire on pin %u", SONDES_PIN);
+  
   pinMode(SONDES_PIN, INPUT_PULLUP);
+  logger::trace("[TEMP] pinMode(SONDES_PIN, INPUT_PULLUP) configured");
+  
+  // Initial sensors setup
+  logger::trace("[TEMP] initial sensors.begin() call");
   sensors.begin();
   sensors.setWaitForConversion(false);
   sensors.setResolution(12);
+  
+  delay(100);
+  logger::trace("[TEMP] delay(100ms) after initial setup");
+  
   discoveredCount = 0;
   initialized = true;
   logger::info("[TEMP] DS18B20 manager initialized");
+  
+  // Now perform the discovery scan
   discoverSensors();
   lastRefreshMs = millis();
 }
 
 void temperature_manager::scanSensors() {
   if (!initialized) {
+    logger::warn("[TEMP] scanSensors() called but not initialized, calling initialize()");
     initialize();
     return;
   }
   logger::info("[TEMP] rescanning DS18B20 sensors");
+  logger::debugf("[TEMP] Current discoveredCount before rescan: %u", discoveredCount);
   discoverSensors();
+  logger::debugf("[TEMP] Current discoveredCount after rescan: %u", discoveredCount);
 }
 
 void temperature_manager::update() {

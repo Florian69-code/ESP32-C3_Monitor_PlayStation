@@ -154,29 +154,115 @@ String buildFallbackHomeHtml(const AppState& state) {
 }
 
 String buildTemperatureSectionHtml(const AppState& state) {
+  const uint8_t profileIndex = static_cast<uint8_t>(state.activeProfile);
   String html;
-  html.reserve(4000);
-  html += "<div class=\"section\"><h3>2. Temperature</h3><p class=\"inline-help\">Detecte les sondes DS18B20 branchees sur la broche 4 et configure leur usage par profil.</p><div class=\"btn-row\"><button class=\"primary\" type=\"button\" id=\"detectSensorsBtn\">Detecter les sondes</button></div><div id=\"sensorStatus\" class=\"inline-help\">Aucune detection effectuee pour le moment.</div><div class=\"grid cols-2\"><div><label for=\"sensor1_address\">Sonde 1 - adresse</label><select id=\"sensor1_address\" name=\"sensor1_address\"><option value=\"\">Aucune</option><option value=\"";
-  html += state.sensorConfig[0].address;
-  html += "\" selected>";
-  html += state.sensorConfig[0].address.length() > 0 ? state.sensorConfig[0].address : "Selection actuelle";
-  html += "</option></select><label for=\"sensor1_name\">Sonde 1 - usage</label><input id=\"sensor1_name\" name=\"sensor1_name\" type=\"text\" value=\"";
+  html.reserve(5000);
+  html += "<div class=\"section\"><h3>2. Temperature</h3><p class=\"inline-help\">Parametres globaux et detection des sondes DS18B20 branchees sur la broche 4.</p>";
+  
+  // Affichage du statut des sondes connectées
+  int connectedCount = 0;
+  String connectedNames = "";
+  if (state.sensorConfig[0].enabled && state.sensorConfig[0].address.length() > 0) {
+    connectedCount++;
+    connectedNames += state.sensorConfig[0].name;
+  }
+  if (state.sensorConfig[1].enabled && state.sensorConfig[1].address.length() > 0) {
+    if (connectedCount > 0) connectedNames += ", ";
+    connectedCount++;
+    connectedNames += state.sensorConfig[1].name;
+  }
+  
+  html += "<div style=\"background: rgba(135, 164, 205, 0.1); padding: 12px; border-radius: 4px; margin-bottom: 16px; border-left: 3px solid #4ad2ff;\"><strong>Sondes detectees:</strong> ";
+  if (connectedCount == 0) {
+    html += "Aucune sonde connectee";
+  } else if (connectedCount == 1) {
+    html += "1 sonde (";
+    html += connectedNames;
+    html += ")";
+  } else {
+    html += connectedCount;
+    html += " sondes (";
+    html += connectedNames;
+    html += ")";
+  }
+  html += "</div>";
+  html += "<label for=\"temperature_idle\">Seuil Temperature IDLE (°C)</label><input id=\"temperature_idle\" name=\"temperature_idle\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
+  html += formatThresholdValue(state.profileThresholds[profileIndex].temperatureIdle);
+  html += "\" required>";
+  html += "<label for=\"temperature_max\">Seuil Temperature MAX (°C)</label><input id=\"temperature_max\" name=\"temperature_max\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
+  html += formatThresholdValue(state.profileThresholds[profileIndex].temperatureMax);
+  html += "\" required>";
+  html += "<p class=\"inline-help\">Detecte les sondes et configure leur adresse par profil.</p><div class=\"btn-row\"><button class=\"primary\" type=\"button\" id=\"detectSensorsBtn\">Detecter les sondes</button></div><div id=\"sensorStatus\" class=\"inline-help\">Aucune detection effectuee pour le moment.</div><div class=\"grid cols-2\"><div><label for=\"sensor1_address\">Sonde 1 - adresse</label><select id=\"sensor1_address\" name=\"sensor1_address\"><option value=\"\">Aucune</option>";
+  if (state.sensorConfig[0].address.length() > 0) {
+    html += "<option value=\"";
+    html += state.sensorConfig[0].address;
+    html += "\" selected>";
+    html += state.sensorConfig[0].address;
+    html += "</option>";
+  }
+  html += "</select><label for=\"sensor1_name\">Sonde 1 - nom</label><input id=\"sensor1_name\" name=\"sensor1_name\" type=\"text\" value=\"";
   html += state.sensorConfig[0].name;
-  html += "\" maxlength=\"16\"><label for=\"sensor1_idle\">Sonde 1 - seuil IDEL (°C)</label><input id=\"sensor1_idle\" name=\"sensor1_idle\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
+  html += "\" maxlength=\"16\"><label for=\"sensor1_idle\">Sonde 1 - seuil IDLE (°C)</label><input id=\"sensor1_idle\" name=\"sensor1_idle\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
   html += formatThresholdValue(state.sensorConfig[0].temperatureIdleThreshold);
   html += "\" required><label for=\"sensor1_max\">Sonde 1 - seuil MAX (°C)</label><input id=\"sensor1_max\" name=\"sensor1_max\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
   html += formatThresholdValue(state.sensorConfig[0].temperatureMaxThreshold);
-  html += "\" required></div><div><label for=\"sensor2_address\">Sonde 2 - adresse</label><select id=\"sensor2_address\" name=\"sensor2_address\"><option value=\"\">Aucune</option><option value=\"";
-  html += state.sensorConfig[1].address;
-  html += "\" selected>";
-  html += state.sensorConfig[1].address.length() > 0 ? state.sensorConfig[1].address : "Selection actuelle";
-  html += "</option></select><label for=\"sensor2_name\">Sonde 2 - usage</label><input id=\"sensor2_name\" name=\"sensor2_name\" type=\"text\" value=\"";
+  html += "\" required></div><div><label for=\"sensor2_address\">Sonde 2 - adresse</label><select id=\"sensor2_address\" name=\"sensor2_address\"><option value=\"\">Aucune</option>";
+  if (state.sensorConfig[1].address.length() > 0) {
+    html += "<option value=\"";
+    html += state.sensorConfig[1].address;
+    html += "\" selected>";
+    html += state.sensorConfig[1].address;
+    html += "</option>";
+  }
+  html += "</select><label for=\"sensor2_name\">Sonde 2 - nom</label><input id=\"sensor2_name\" name=\"sensor2_name\" type=\"text\" value=\"";
   html += state.sensorConfig[1].name;
-  html += "\" maxlength=\"16\"><label for=\"sensor2_idle\">Sonde 2 - seuil IDEL (°C)</label><input id=\"sensor2_idle\" name=\"sensor2_idle\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
+  html += "\" maxlength=\"16\"><label for=\"sensor2_idle\">Sonde 2 - seuil IDLE (°C)</label><input id=\"sensor2_idle\" name=\"sensor2_idle\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
   html += formatThresholdValue(state.sensorConfig[1].temperatureIdleThreshold);
   html += "\" required><label for=\"sensor2_max\">Sonde 2 - seuil MAX (°C)</label><input id=\"sensor2_max\" name=\"sensor2_max\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
   html += formatThresholdValue(state.sensorConfig[1].temperatureMaxThreshold);
-  html += "\" required></div></div><script>const detectSensorsBtn=document.getElementById('detectSensorsBtn');const sensorStatus=document.getElementById('sensorStatus');const sensor1Select=document.getElementById('sensor1_address');const sensor2Select=document.getElementById('sensor2_address');function populateSensorOptions(payload){const sensors=payload||{};const options=[{address:'', name:'Aucune'}];Object.keys(sensors).forEach((key)=>{const sensor=sensors[key]||{};if(sensor.address){options.push({address:sensor.address,name:sensor.name||sensor.address});}});const fillSelect=(select)=>{const currentValue=select.value;select.innerHTML='';const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Aucune';select.appendChild(placeholder);options.forEach((option)=>{const item=document.createElement('option');item.value=option.address;item.textContent=option.address?option.address:(option.name||'Aucune');if(currentValue&&currentValue===option.address){item.selected=true;}select.appendChild(item);});if(!select.value&&options.length>1){select.value=options[1].address;}};fillSelect(sensor1Select);fillSelect(sensor2Select);}if(detectSensorsBtn){detectSensorsBtn.addEventListener('click',async()=>{sensorStatus.textContent='Detection en cours...';try{const response=await fetch('/api/temperature/scan',{cache:'no-store'});if(!response.ok){throw new Error('HTTP '+response.status);}const payload=await response.json();populateSensorOptions(payload);sensorStatus.textContent='Sondes detectees. Selectionnez la bonne adresse puis sauvegardez.';}catch(error){sensorStatus.textContent='Detection impossible : '+error.message;}});}if(sensorStatus){sensorStatus.textContent='Utilisez le bouton pour detecter les sondes connectees.';}</script></div>";
+  html += "\" required></div></div><script>";
+  html += "const detectSensorsBtn=document.getElementById('detectSensorsBtn');";
+  html += "const sensorStatus=document.getElementById('sensorStatus');";
+  html += "const sensor1Select=document.getElementById('sensor1_address');";
+  html += "const sensor2Select=document.getElementById('sensor2_address');";
+  html += "function populateSensorOptions(payload){";
+  html += "  const sensors=payload||{};";
+  html += "  const fillSelect=(select)=>{";
+  html += "    if(!select)return;";
+  html += "    const currentValue=select.value;";
+  html += "    select.innerHTML='';";
+  html += "    const placeholder=document.createElement('option');";
+  html += "    placeholder.value='';";
+  html += "    placeholder.textContent='Aucune';";
+  html += "    select.appendChild(placeholder);";
+  html += "    const addresses=Object.keys(sensors).filter(k=>sensors[k]&&sensors[k].address).map(k=>sensors[k].address).sort();";
+  html += "    addresses.forEach((addr)=>{";
+  html += "      const item=document.createElement('option');";
+  html += "      item.value=addr;";
+  html += "      item.textContent=addr;";
+  html += "      if(currentValue===addr)item.selected=true;";
+  html += "      select.appendChild(item);";
+  html += "    });";
+  html += "  };";
+  html += "  fillSelect(sensor1Select);";
+  html += "  fillSelect(sensor2Select);";
+  html += "}";
+  html += "if(detectSensorsBtn){";
+  html += "  detectSensorsBtn.addEventListener('click',async()=>{";
+  html += "    sensorStatus.textContent='Detection en cours...';";
+  html += "    try{";
+  html += "      const response=await fetch('/api/temperature/scan',{cache:'no-store'});";
+  html += "      if(!response.ok)throw new Error('HTTP '+response.status);";
+  html += "      const payload=await response.json();";
+  html += "      populateSensorOptions(payload);";
+  html += "      sensorStatus.textContent='Sondes detectees. Selectionnez la bonne adresse puis sauvegardez.';";
+  html += "    }catch(error){";
+  html += "      sensorStatus.textContent='Detection impossible: '+error.message;";
+  html += "    }";
+  html += "  });";
+  html += "}";
+  html += "if(sensorStatus)sensorStatus.textContent='Utilisez le bouton pour detecter les sondes connectees.';";
+  html += "</script></div>";
   return html;
 }
 

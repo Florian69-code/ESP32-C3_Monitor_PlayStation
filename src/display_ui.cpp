@@ -348,40 +348,32 @@ void drawGraphDashboard() {
   display.sendBuffer();
 }
 
-// Affiche les détails bruts : PWM courant, PWM max observé et fréquence.
+// Affiche les températures des deux sondes en grand format.
 void drawTemperaturePage() {
   auto& state = getAppState();
   display.clearBuffer();
 
-  display.setFont(u8g2_font_4x6_tf);
-  display.drawStr(15, 7, "Temperature");
-
   const bool hasFirst = state.sensorConfig[0].detected && !isnan(state.sensorConfig[0].currentTemperature);
   const bool hasSecond = state.sensorConfig[1].detected && !isnan(state.sensorConfig[1].currentTemperature);
 
-  char text[12];
-  display.setFont(u8g2_font_5x7_tf);
+  char leftText[12];
+  char rightText[12];
   if (hasFirst) {
-    snprintf(text, sizeof(text), "%3.0f", state.sensorConfig[0].currentTemperature);
+    snprintf(leftText, sizeof(leftText), "%0.1f", state.sensorConfig[0].currentTemperature);
   } else {
-    snprintf(text, sizeof(text), "N/A");
+    snprintf(leftText, sizeof(leftText), "N/A");
   }
-  display.drawStr(2, 22, text);
 
-  display.setFont(u8g2_font_5x7_tf);
-  display.drawStr(30, 22, "|");
-
-  display.setFont(u8g2_font_5x7_tf);
   if (hasSecond) {
-    snprintf(text, sizeof(text), "%3.0f", state.sensorConfig[1].currentTemperature);
+    snprintf(rightText, sizeof(rightText), "%0.1f", state.sensorConfig[1].currentTemperature);
   } else {
-    snprintf(text, sizeof(text), "N/A");
+    snprintf(rightText, sizeof(rightText), "N/A");
   }
-  display.drawStr(45, 22, text);
 
-  display.setFont(u8g2_font_4x6_tf);
-  display.drawStr(2, 38, state.sensorConfig[0].name.length() > 0 ? state.sensorConfig[0].name.c_str() : "sonde1");
-  display.drawStr(45, 38, state.sensorConfig[1].name.length() > 0 ? state.sensorConfig[1].name.c_str() : "sonde2");
+  display.setFont(u8g2_font_7x13B_tf);
+  const int rightWidth = display.getStrWidth(rightText);
+  display.drawStr(0, 31, leftText);
+  display.drawStr(SCREEN_WIDTH - rightWidth, 31, rightText);
 
   display.sendBuffer();
 }
