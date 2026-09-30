@@ -14,15 +14,17 @@ DeviceAddress SONDE2_ID = {};
 namespace {
 constexpr uint8_t kMaxSensors = 2;
 constexpr uint32_t kSensorRefreshMs = 2000;
-constexpr uint8_t kSensorNameMaxLength = 16;
+// Conversion DS18B20 en 12 bits : 750 ms max.
+constexpr uint32_t kConversionWaitMs = 800;
+constexpr uint8_t kAddressHexLength = 16;
 
 OneWire oneWire(SONDES_PIN);
 DallasTemperature sensors(&oneWire);
 DeviceAddress discoveredAddresses[kMaxSensors];
-char discoveredNames[kMaxSensors][kSensorNameMaxLength] = {"sonde1", "sonde2"};
 float discoveredTemperatures[kMaxSensors] = {NAN, NAN};
 uint8_t discoveredCount = 0;
-uint32_t lastRefreshMs = 0;
+uint32_t lastRequestMs = 0;
+bool conversionPending = false;
 bool initialized = false;
 
 String deviceAddressToString(const DeviceAddress& address) {
@@ -47,214 +49,192 @@ void copyAddress(DeviceAddress& dst, const DeviceAddress& src) {
   }
 }
 
-void readTemperatures() {
-  if (!initialized) {
-    return;
+int hexDigitValue(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+bool parseAddress(const String& hex, DeviceAddress& out) {
+  if (hex.length() != kAddressHexLength) {
+    return false;
   }
-
-  logger::debugf("[TEMP] readTemperatures() - discoveredCount=%u", discoveredCount);
-  
-  auto& state = getAppState();
-  sensors.requestTemperatures();
-  delay(20);
-
-  for (uint8_t i = 0; i < discoveredCount; ++i) {
-    const float value = sensors.getTempC(discoveredAddresses[i]);
-    if (value != DEVICE_DISCONNECTED_C) {
-      discoveredTemperatures[i] = value;
-      state.sensorConfig[i].currentTemperature = value;
-      state.sensorConfig[i].detected = true;
-      logger::tracef("[TEMP] sensor %u read successfully: %.1fC", i + 1, value);
-    } else {
-      discoveredTemperatures[i] = NAN;
-      state.sensorConfig[i].currentTemperature = NAN;
-      state.sensorConfig[i].detected = false;
-      logger::warnf("[TEMP] sensor %u disconnected", i + 1);
+  for (uint8_t i = 0; i < 8; ++i) {
+    const int high = hexDigitValue(hex[i * 2]);
+    const int low = hexDigitValue(hex[i * 2 + 1]);
+    if (high < 0 || low < 0) {
+      return false;
     }
+    out[i] = static_cast<uint8_t>((high << 4) | low);
+  }
+  return true;
+}
+
+const char* profilePrefix(ConsoleProfile profile) {
+  return profile == ConsoleProfile::PS4_PRO ? "p4" : (profile == ConsoleProfile::PS3_FAT ? "p3" : "p5");
+}
+
+// Cles NVS limitees a 15 caracteres : "<prefixe>_<suffixe>".
+void makeKey(char (&buffer)[24], const char* prefix, const char* suffix) {
+  snprintf(buffer, sizeof(buffer), "%s_%s", prefix, suffix);
+}
+
+void makeSlotPrefix(char (&buffer)[8], const char* prefix, uint8_t slot) {
+  snprintf(buffer, sizeof(buffer), "%s_s%u", prefix, static_cast<unsigned>(slot + 1));
+}
+
+// Adresse effective d'un emplacement : adresse choisie par l'utilisateur ou,
+// si aucune sonde n'est configuree, ordre de decouverte du bus.
+bool resolveSlotAddress(uint8_t slot, DeviceAddress& out) {
+  auto& state = getAppState();
+  const SensorConfig& config = state.sensorConfig[slot];
+  if (config.enabled && config.address.length() > 0) {
+    return parseAddress(config.address, out);
   }
 
-  if (discoveredCount < 2) {
-    state.sensorConfig[1].currentTemperature = NAN;
-    state.sensorConfig[1].detected = false;
+  if (state.sensorConfig[0].enabled || state.sensorConfig[1].enabled) {
+    return false;
+  }
+  if (slot < discoveredCount) {
+    copyAddress(out, discoveredAddresses[slot]);
+    return true;
+  }
+  return false;
+}
+
+void updateDetectionFlags() {
+  auto& state = getAppState();
+  for (uint8_t slot = 0; slot < kMaxSensors; ++slot) {
+    DeviceAddress address;
+    state.sensorConfig[slot].detected = resolveSlotAddress(slot, address) && sensors.isConnected(address);
+    state.sensorConfig[slot].currentTemperature = NAN;
+  }
+}
+
+void readTemperatures() {
+  auto& state = getAppState();
+  for (uint8_t slot = 0; slot < kMaxSensors; ++slot) {
+    DeviceAddress address;
+    const bool wasDetected = state.sensorConfig[slot].detected;
+    float value = DEVICE_DISCONNECTED_C;
+    if (resolveSlotAddress(slot, address)) {
+      value = sensors.getTempC(address);
+    }
+
+    const bool ok = value != DEVICE_DISCONNECTED_C;
+    state.sensorConfig[slot].detected = ok;
+    state.sensorConfig[slot].currentTemperature = ok ? value : NAN;
+
+    // Journalise uniquement les changements d'etat pour ne pas polluer la console.
+    if (ok && !wasDetected) {
+      logger::infof("[TEMP] sensor %u connected", static_cast<unsigned>(slot + 1));
+    } else if (!ok && wasDetected) {
+      logger::warnf("[TEMP] sensor %u disconnected", static_cast<unsigned>(slot + 1));
+    }
   }
 }
 
 void discoverSensors() {
   discoveredCount = 0;
-  
-  logger::debugf("[TEMP] discoverSensors() starting - SONDES_PIN=%u", SONDES_PIN);
-  
-  // When rescanning, reconfigure the GPIO and reinitialize the bus
-  if (initialized) {
-    logger::trace("[TEMP] rescanning: reconfiguring GPIO pin as INPUT_PULLUP");
-    pinMode(SONDES_PIN, INPUT_PULLUP);
-    delay(50);
-    
-    logger::trace("[TEMP] rescanning: calling sensors.begin() for re-initialization");
-    sensors.begin();
-    delay(100);
-  }
-  
+  logger::debugf("[TEMP] discoverSensors() on pin %u", SONDES_PIN);
+
+  pinMode(SONDES_PIN, INPUT_PULLUP);
+  sensors.begin();
   sensors.setWaitForConversion(false);
   sensors.setResolution(12);
-  logger::trace("[TEMP] sensors configuration (waitForConversion=false, resolution=12) applied");
 
   const uint8_t sensorCount = sensors.getDeviceCount();
-  logger::debugf("[TEMP] sensors.getDeviceCount() returned: %u", sensorCount);
   logger::infof("[TEMP] discovered %u devices on pin %u", sensorCount, SONDES_PIN);
 
   if (sensorCount == 0) {
     logger::warn("[TEMP] no DS18B20 device detected");
     logger::debugf("[TEMP] GPIO level (1=HIGH/idle, 0=LOW): %d", digitalRead(SONDES_PIN));
+  }
+
+  for (uint8_t i = 0; i < sensorCount && discoveredCount < kMaxSensors; ++i) {
+    DeviceAddress address;
+    if (!sensors.getAddress(address, i) || isAddressEmpty(address)) {
+      logger::warnf("[TEMP] invalid address for device index %u", i);
+      continue;
+    }
+
+    copyAddress(discoveredAddresses[discoveredCount], address);
+    discoveredTemperatures[discoveredCount] = NAN;
+    logger::infof("[TEMP] sensor %u address=%s", static_cast<unsigned>(discoveredCount + 1), deviceAddressToString(address).c_str());
+    ++discoveredCount;
+  }
+
+  conversionPending = false;
+  updateDetectionFlags();
+}
+
+// Lecture bloquante (~750 ms) pour afficher une temperature a cote de chaque adresse detectee.
+void readDiscoveredTemperatures() {
+  if (discoveredCount == 0) {
     return;
   }
 
-  for (uint8_t i = 0; i < min(sensorCount, kMaxSensors); ++i) {
-    logger::debugf("[TEMP] attempting to read address for sensor index %u", i);
-    
-    if (!sensors.getAddress(discoveredAddresses[i], i)) {
-      logger::warnf("[TEMP] failed to read address for sensor %u", i + 1);
-      continue;
-    }
-
-    if (isAddressEmpty(discoveredAddresses[i])) {
-      logger::warnf("[TEMP] empty address for sensor %u", i + 1);
-      continue;
-    }
-
-    discoveredCount = i + 1;
-    logger::debugf("[TEMP] sensor %u successfully read with address=%s", i + 1, deviceAddressToString(discoveredAddresses[i]).c_str());
-    logger::infof("[TEMP] sensor %u address=%s", i + 1, deviceAddressToString(discoveredAddresses[i]).c_str());
-  }
+  sensors.setWaitForConversion(true);
+  sensors.requestTemperatures();
+  sensors.setWaitForConversion(false);
 
   for (uint8_t i = 0; i < discoveredCount; ++i) {
-    discoveredTemperatures[i] = NAN;
-  }
-
-  auto& state = getAppState();
-  state.sensorConfig[0].detected = discoveredCount > 0;
-  state.sensorConfig[1].detected = discoveredCount > 1;
-  state.sensorConfig[0].currentTemperature = NAN;
-  state.sensorConfig[1].currentTemperature = NAN;
-}
-
-void applySensorNames(const char* name1, const char* name2) {
-  if (name1 != nullptr && strlen(name1) > 0) {
-    strncpy(discoveredNames[0], name1, kSensorNameMaxLength - 1);
-    discoveredNames[0][kSensorNameMaxLength - 1] = '\0';
-  } else {
-    strncpy(discoveredNames[0], "sonde1", kSensorNameMaxLength - 1);
-    discoveredNames[0][kSensorNameMaxLength - 1] = '\0';
-  }
-
-  if (name2 != nullptr && strlen(name2) > 0) {
-    strncpy(discoveredNames[1], name2, kSensorNameMaxLength - 1);
-    discoveredNames[1][kSensorNameMaxLength - 1] = '\0';
-  } else {
-    strncpy(discoveredNames[1], "sonde2", kSensorNameMaxLength - 1);
-    discoveredNames[1][kSensorNameMaxLength - 1] = '\0';
+    const float value = sensors.getTempC(discoveredAddresses[i]);
+    discoveredTemperatures[i] = value != DEVICE_DISCONNECTED_C ? value : NAN;
   }
 }
 
 void loadPersistedSensorSettings(Preferences& preferences, ConsoleProfile profile) {
-  const char* prefix = profile == ConsoleProfile::PS4_PRO ? "p4" : (profile == ConsoleProfile::PS3_FAT ? "p3" : "p5");
-  char key1[16];
-  char key2[16];
-  char keyName1[24];
-  char keyName2[24];
-  char keyIdle1[24];
-  char keyMax1[24];
-  char keyIdle2[24];
-  char keyMax2[24];
-  snprintf(key1, sizeof(key1), "%s_s1_addr", prefix);
-  snprintf(key2, sizeof(key2), "%s_s2_addr", prefix);
-  snprintf(keyName1, sizeof(keyName1), "%s_s1_name", prefix);
-  snprintf(keyName2, sizeof(keyName2), "%s_s2_name", prefix);
-  snprintf(keyIdle1, sizeof(keyIdle1), "%s_s1_t_idle", prefix);
-  snprintf(keyMax1, sizeof(keyMax1), "%s_s1_t_max", prefix);
-  snprintf(keyIdle2, sizeof(keyIdle2), "%s_s2_t_idle", prefix);
-  snprintf(keyMax2, sizeof(keyMax2), "%s_s2_t_max", prefix);
-
+  const char* prefix = profilePrefix(profile);
   auto& state = getAppState();
-  const uint8_t profileIndex = static_cast<uint8_t>(profile);
-  const float defaultIdle = state.profileThresholds[profileIndex].temperatureIdle;
-  const float defaultMax = state.profileThresholds[profileIndex].temperatureMax;
-  String addr1 = preferences.getString(key1, "");
-  String addr2 = preferences.getString(key2, "");
-  String name1 = preferences.getString(keyName1, "sonde1");
-  String name2 = preferences.getString(keyName2, "sonde2");
+  const ProfileThresholds& profileThresholds = state.profileThresholds[static_cast<uint8_t>(profile)];
 
-  if (addr1.length() > 0) {
-    state.sensorConfig[0].address = addr1;
-    state.sensorConfig[0].name = name1;
-    state.sensorConfig[0].enabled = true;
-  } else {
-    state.sensorConfig[0].address = "";
-    state.sensorConfig[0].name = "sonde1";
-    state.sensorConfig[0].enabled = false;
+  for (uint8_t slot = 0; slot < kMaxSensors; ++slot) {
+    char slotPrefix[8];
+    makeSlotPrefix(slotPrefix, prefix, slot);
+
+    char key[24];
+    SensorConfig& config = state.sensorConfig[slot];
+    const String defaultName = String("sonde") + String(slot + 1);
+
+    makeKey(key, slotPrefix, "addr");
+    config.address = preferences.getString(key, "");
+    config.enabled = config.address.length() > 0;
+
+    makeKey(key, slotPrefix, "name");
+    config.name = config.enabled ? preferences.getString(key, defaultName) : defaultName;
+    if (config.name.length() == 0) {
+      config.name = defaultName;
+    }
+
+    makeKey(key, slotPrefix, "t_idle");
+    config.temperatureIdleThreshold = preferences.getFloat(key, profileThresholds.temperatureIdle);
+    makeKey(key, slotPrefix, "t_max");
+    config.temperatureMaxThreshold = preferences.getFloat(key, profileThresholds.temperatureMax);
   }
-  state.sensorConfig[0].temperatureIdleThreshold = preferences.getFloat(keyIdle1, defaultIdle);
-  state.sensorConfig[0].temperatureMaxThreshold = preferences.getFloat(keyMax1, defaultMax);
-
-  if (addr2.length() > 0) {
-    state.sensorConfig[1].address = addr2;
-    state.sensorConfig[1].name = name2;
-    state.sensorConfig[1].enabled = true;
-  } else {
-    state.sensorConfig[1].address = "";
-    state.sensorConfig[1].name = "sonde2";
-    state.sensorConfig[1].enabled = false;
-  }
-  state.sensorConfig[1].temperatureIdleThreshold = preferences.getFloat(keyIdle2, defaultIdle);
-  state.sensorConfig[1].temperatureMaxThreshold = preferences.getFloat(keyMax2, defaultMax);
-}
-
-void setCurrentProfileSensorConfig(ConsoleProfile profile) {
-  auto& state = getAppState();
-  const uint8_t index = static_cast<uint8_t>(profile);
-  const auto& thresholds = state.profileThresholds[index];
-
-  state.sensorConfig[0].temperatureIdleThreshold = thresholds.temperatureIdle;
-  state.sensorConfig[0].temperatureMaxThreshold = thresholds.temperatureMax;
-  state.sensorConfig[1].temperatureIdleThreshold = thresholds.temperatureIdle;
-  state.sensorConfig[1].temperatureMaxThreshold = thresholds.temperatureMax;
 }
 }  // namespace
 
 void temperature_manager::initialize() {
-  logger::debugf("[TEMP] initialize() starting - setting up OneWire on pin %u", SONDES_PIN);
-  
-  pinMode(SONDES_PIN, INPUT_PULLUP);
-  logger::trace("[TEMP] pinMode(SONDES_PIN, INPUT_PULLUP) configured");
-  
-  // Initial sensors setup
-  logger::trace("[TEMP] initial sensors.begin() call");
-  sensors.begin();
-  sensors.setWaitForConversion(false);
-  sensors.setResolution(12);
-  
-  delay(100);
-  logger::trace("[TEMP] delay(100ms) after initial setup");
-  
-  discoveredCount = 0;
+  logger::debugf("[TEMP] initialize() - OneWire on pin %u", SONDES_PIN);
+
   initialized = true;
-  logger::info("[TEMP] DS18B20 manager initialized");
-  
-  // Now perform the discovery scan
   discoverSensors();
-  lastRefreshMs = millis();
+  // Premiere requete de conversion des le premier update().
+  lastRequestMs = millis() - kSensorRefreshMs;
+  logger::info("[TEMP] DS18B20 manager initialized");
 }
 
 void temperature_manager::scanSensors() {
   if (!initialized) {
-    logger::warn("[TEMP] scanSensors() called but not initialized, calling initialize()");
     initialize();
     return;
   }
+
   logger::info("[TEMP] rescanning DS18B20 sensors");
-  logger::debugf("[TEMP] Current discoveredCount before rescan: %u", discoveredCount);
   discoverSensors();
-  logger::debugf("[TEMP] Current discoveredCount after rescan: %u", discoveredCount);
+  readDiscoveredTemperatures();
 }
 
 void temperature_manager::update() {
@@ -263,86 +243,90 @@ void temperature_manager::update() {
   }
 
   const uint32_t nowMs = millis();
-  if (nowMs - lastRefreshMs < kSensorRefreshMs) {
+  if (conversionPending) {
+    if (nowMs - lastRequestMs >= kConversionWaitMs) {
+      readTemperatures();
+      conversionPending = false;
+    }
     return;
   }
-  lastRefreshMs = nowMs;
 
-  readTemperatures();
-  logger::trace("[TEMP] temperature refresh completed");
+  if (nowMs - lastRequestMs >= kSensorRefreshMs) {
+    sensors.requestTemperatures();
+    lastRequestMs = nowMs;
+    conversionPending = true;
+  }
 }
 
 void temperature_manager::loadFromPreferences(Preferences& preferences, ConsoleProfile profile) {
   loadPersistedSensorSettings(preferences, profile);
-  setCurrentProfileSensorConfig(profile);
 }
 
 bool temperature_manager::saveToPreferences(Preferences& preferences, ConsoleProfile profile) {
   auto& state = getAppState();
-  const char* prefix = profile == ConsoleProfile::PS4_PRO ? "p4" : (profile == ConsoleProfile::PS3_FAT ? "p3" : "p5");
-  char key1[16];
-  char key2[16];
-  char keyName1[24];
-  char keyName2[24];
-  char keyIdle1[24];
-  char keyMax1[24];
-  char keyIdle2[24];
-  char keyMax2[24];
-  snprintf(key1, sizeof(key1), "%s_s1_addr", prefix);
-  snprintf(key2, sizeof(key2), "%s_s2_addr", prefix);
-  snprintf(keyName1, sizeof(keyName1), "%s_s1_name", prefix);
-  snprintf(keyName2, sizeof(keyName2), "%s_s2_name", prefix);
-  snprintf(keyIdle1, sizeof(keyIdle1), "%s_s1_t_idle", prefix);
-  snprintf(keyMax1, sizeof(keyMax1), "%s_s1_t_max", prefix);
-  snprintf(keyIdle2, sizeof(keyIdle2), "%s_s2_t_idle", prefix);
-  snprintf(keyMax2, sizeof(keyMax2), "%s_s2_t_max", prefix);
+  const char* prefix = profilePrefix(profile);
+  const ProfileThresholds& profileThresholds = state.profileThresholds[static_cast<uint8_t>(profile)];
+  bool ok = true;
 
-  const size_t written1 = preferences.putString(key1, state.sensorConfig[0].address);
-  const size_t written2 = preferences.putString(key2, state.sensorConfig[1].address);
-  const size_t written3 = preferences.putString(keyName1, state.sensorConfig[0].name);
-  const size_t written4 = preferences.putString(keyName2, state.sensorConfig[1].name);
-  const bool ok1 = written1 > 0;
-  const bool ok2 = written2 > 0;
-  const bool ok3 = written3 > 0;
-  const bool ok4 = written4 > 0;
+  auto saveString = [&](const char* keyPrefix, const char* suffix, const String& value) {
+    char key[24];
+    makeKey(key, keyPrefix, suffix);
+    if (preferences.putString(key, value) != value.length()) {
+      logger::errorf("[TEMP] failed to persist key=%s", key);
+      ok = false;
+    }
+  };
+  auto saveFloat = [&](const char* keyPrefix, const char* suffix, float value) {
+    char key[24];
+    makeKey(key, keyPrefix, suffix);
+    if (preferences.putFloat(key, value) != sizeof(float)) {
+      logger::errorf("[TEMP] failed to persist key=%s", key);
+      ok = false;
+    }
+  };
 
-  if (!ok1 || !ok2 || !ok3 || !ok4) {
-    logger::error("[TEMP] failed to persist temperature sensor settings");
-    return false;
+  for (uint8_t slot = 0; slot < kMaxSensors; ++slot) {
+    char slotPrefix[8];
+    makeSlotPrefix(slotPrefix, prefix, slot);
+    const SensorConfig& config = state.sensorConfig[slot];
+    saveString(slotPrefix, "addr", config.address);
+    saveString(slotPrefix, "name", config.name);
+    saveFloat(slotPrefix, "t_idle", config.temperatureIdleThreshold);
+    saveFloat(slotPrefix, "t_max", config.temperatureMaxThreshold);
   }
 
-  preferences.putFloat(keyIdle1, state.sensorConfig[0].temperatureIdleThreshold);
-  preferences.putFloat(keyMax1, state.sensorConfig[0].temperatureMaxThreshold);
-  preferences.putFloat(keyIdle2, state.sensorConfig[1].temperatureIdleThreshold);
-  preferences.putFloat(keyMax2, state.sensorConfig[1].temperatureMaxThreshold);
-  preferences.putFloat("temperature_idle", state.profileThresholds[static_cast<uint8_t>(profile)].temperatureIdle);
-  preferences.putFloat("temperature_max", state.profileThresholds[static_cast<uint8_t>(profile)].temperatureMax);
-  logger::info("[TEMP] temperature sensor settings saved");
-  return true;
+  saveFloat(prefix, "t_idle", profileThresholds.temperatureIdle);
+  saveFloat(prefix, "t_max", profileThresholds.temperatureMax);
+
+  if (ok) {
+    logger::info("[TEMP] temperature sensor settings saved");
+  }
+  return ok;
 }
 
 void temperature_manager::clearPersistedSettings(Preferences& preferences, ConsoleProfile profile) {
-  const char* prefix = profile == ConsoleProfile::PS4_PRO ? "p4" : (profile == ConsoleProfile::PS3_FAT ? "p3" : "p5");
-  char key1[16];
-  char key2[16];
-  char keyIdle1[24];
-  char keyMax1[24];
-  char keyIdle2[24];
-  char keyMax2[24];
-  snprintf(key1, sizeof(key1), "%s_s1_addr", prefix);
-  snprintf(key2, sizeof(key2), "%s_s2_addr", prefix);
-  snprintf(keyIdle1, sizeof(keyIdle1), "%s_s1_t_idle", prefix);
-  snprintf(keyMax1, sizeof(keyMax1), "%s_s1_t_max", prefix);
-  snprintf(keyIdle2, sizeof(keyIdle2), "%s_s2_t_idle", prefix);
-  snprintf(keyMax2, sizeof(keyMax2), "%s_s2_t_max", prefix);
-  preferences.remove(key1);
-  preferences.remove(key2);
-  preferences.remove(keyIdle1);
-  preferences.remove(keyMax1);
-  preferences.remove(keyIdle2);
-  preferences.remove(keyMax2);
-  preferences.remove("temperature_idle");
-  preferences.remove("temperature_max");
+  const char* prefix = profilePrefix(profile);
+  const char* slotSuffixes[] = {"addr", "name", "t_idle", "t_max"};
+  char key[24];
+
+  for (uint8_t slot = 0; slot < kMaxSensors; ++slot) {
+    char slotPrefix[8];
+    makeSlotPrefix(slotPrefix, prefix, slot);
+    for (const char* suffix : slotSuffixes) {
+      makeKey(key, slotPrefix, suffix);
+      preferences.remove(key);
+    }
+  }
+
+  makeKey(key, prefix, "t_idle");
+  preferences.remove(key);
+  makeKey(key, prefix, "t_max");
+  preferences.remove(key);
+}
+
+bool temperature_manager::isValidAddress(const String& address) {
+  DeviceAddress parsed;
+  return parseAddress(address, parsed);
 }
 
 String temperature_manager::getDetectedSensorsJson() {
@@ -351,7 +335,9 @@ String temperature_manager::getDetectedSensorsJson() {
     if (i > 0) {
       json += ",";
     }
-    json += String("\"") + String(i) + String("\":{\"address\":\"") + deviceAddressToString(discoveredAddresses[i]) + String("\",\"name\":\"") + discoveredNames[i] + String("\",\"temperature\":") + (isnan(discoveredTemperatures[i]) ? String("null") : String(discoveredTemperatures[i], 1)) + String("}");
+    json += String("\"") + String(i) + String("\":{\"address\":\"") + deviceAddressToString(discoveredAddresses[i]) +
+            String("\",\"temperature\":") +
+            (isnan(discoveredTemperatures[i]) ? String("null") : String(discoveredTemperatures[i], 1)) + String("}");
   }
   json += "}";
   return json;

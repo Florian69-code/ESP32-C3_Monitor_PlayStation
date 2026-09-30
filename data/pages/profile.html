@@ -79,15 +79,12 @@
     const coolInput = document.getElementById('game_cool_max');
     const hotInput = document.getElementById('game_hot_max');
     const thresholdsByProfile = {{PROFILE_THRESHOLDS_JSON}};
-    const sensor1Select = document.getElementById('sensor1_address');
-    const sensor2Select = document.getElementById('sensor2_address');
-    const detectSensorsBtn = document.getElementById('detectSensorsBtn');
-    const sensorStatus = document.getElementById('sensorStatus');
     const temperatureCanvas = document.getElementById('temperatureChart');
     const temperatureChartStatus = document.getElementById('temperatureChartStatus');
     const temperatureCtx = temperatureCanvas ? temperatureCanvas.getContext('2d') : null;
     const temperatureSessionStartMs = Date.now();
     const temperatureSamples = [];
+    const sensorLabels = ['Sonde 1', 'Sonde 2'];
     let temperatureRefreshInFlight = false;
 
     function applyThresholdsForProfile(profileValue) {
@@ -144,13 +141,7 @@
       if (temperatureCanvas.width !== newWidth || temperatureCanvas.height !== newHeight) {
         temperatureCanvas.width = newWidth;
         temperatureCanvas.height = newHeight;
-        
-        // Après le redimensionnement, réappliquer le scale
-        if (temperatureCtx) {
-          temperatureCtx.scale(dpr, dpr);
-          // Redessine le graphique après redimensionnement
-          drawTemperatureChart();
-        }
+        drawTemperatureChart();
       }
     }
 
@@ -159,8 +150,11 @@
         return;
       }
 
-      const width = temperatureCanvas.width;
-      const height = temperatureCanvas.height;
+      // Coordonnees en pixels CSS ; le canvas est dimensionne en pixels physiques.
+      const dpr = window.devicePixelRatio || 1;
+      temperatureCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const width = temperatureCanvas.width / dpr;
+      const height = temperatureCanvas.height / dpr;
       temperatureCtx.clearRect(0, 0, width, height);
       temperatureCtx.fillStyle = 'rgba(3, 8, 15, 0.85)';
       temperatureCtx.fillRect(0, 0, width, height);
@@ -245,14 +239,15 @@
       drawSeries('sensor1', '#4ad2ff');
       drawSeries('sensor2', '#8dffb2');
 
-      temperatureCtx.fillStyle = '#4ad2ff';
-      temperatureCtx.fillRect(left, 10, 10, 10);
-      temperatureCtx.fillStyle = '#a2b4cd';
-      temperatureCtx.fillText('Sonde 1', left + 16, 19);
-      temperatureCtx.fillStyle = '#8dffb2';
-      temperatureCtx.fillRect(left + 92, 10, 10, 10);
-      temperatureCtx.fillStyle = '#a2b4cd';
-      temperatureCtx.fillText('Sonde 2', left + 108, 19);
+      let legendX = left;
+      [['#4ad2ff', 0], ['#8dffb2', 1]].forEach(([color, index]) => {
+        const label = sensorLabels[index];
+        temperatureCtx.fillStyle = color;
+        temperatureCtx.fillRect(legendX, 10, 10, 10);
+        temperatureCtx.fillStyle = '#a2b4cd';
+        temperatureCtx.fillText(label, legendX + 16, 19);
+        legendX += 16 + temperatureCtx.measureText(label).width + 20;
+      });
       temperatureCtx.fillText(`Fenetre: ${Math.max(0, Math.floor(visibleStart))}s -> ${Math.max(0, Math.floor(visibleEnd))}s`, left, height - 18);
     }
 
@@ -273,6 +268,8 @@
         const sensor2 = payload['1'] || {};
         const sensor1Temperature = parseTemperatureValue(sensor1.temperature);
         const sensor2Temperature = parseTemperatureValue(sensor2.temperature);
+        sensorLabels[0] = sensor1.name || 'Sonde 1';
+        sensorLabels[1] = sensor2.name || 'Sonde 2';
 
         // Affiche le statut avec des infos supplémentaires
         const statusParts = [];

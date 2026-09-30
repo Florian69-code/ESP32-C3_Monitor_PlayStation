@@ -91,13 +91,30 @@ Les mesures valides sont filtrees avec 90 % de l'ancienne valeur et 10 % de la n
 
 ### Temperature
 
-`src/temperature_manager.*` utilise OneWire et DallasTemperature: detection au demarrage et sur demande, maximum de deux sondes, resolution 12 bits, lecture toutes les 2 secondes et valeur `N/A` si indisponible. La page Profil permet de selectionner une adresse, un nom et des seuils IDEL/MAX pour chaque sonde; ces reglages sont geres par profil dans Preferences.
+`src/temperature_manager.*` utilise OneWire et DallasTemperature.
+
+- Detection au demarrage et sur demande (`scanSensors()`): maximum de deux adresses, resolution 12 bits. Un scan manuel lit aussi une fois les temperatures (lecture bloquante d'environ 750 ms) pour les afficher a cote des adresses.
+- Affectation: chaque emplacement (sonde 1 / sonde 2) utilise l'adresse configuree; si aucun emplacement n'est configure, l'ordre de decouverte du bus est utilise. `detected` est vrai si la sonde repond.
+- Lecture non bloquante dans `update()`: requete de conversion toutes les 2 secondes, lecture des valeurs environ 800 ms plus tard. Valeur `N/A` si indisponible.
+- Les connexions et deconnexions sont journalisees uniquement lors d'un changement d'etat.
+- `isValidAddress()` valide une adresse de 16 caracteres hexadecimaux.
+
+La page Profil permet de selectionner une adresse, un nom et des seuils IDLE/MAX pour chaque sonde; ces reglages sont geres par profil dans Preferences.
 
 ### Reseau et interface Web
 
 `src/network/wifi_manager.*` configure uniquement un point d'acces (`WIFI_AP`) a l'adresse `192.168.4.1`; il ne gere pas de connexion a un reseau externe.
 
 `web_ui.*` declare les routes, verifie l'authentification et applique les formulaires. `web_pages.*` charge les templates et injecte l'etat. `web_storage.*` monte LittleFS et sert les fichiers statiques; en cas d'indisponibilite, les pages HTML et CSS de secours sont generees en C++.
+
+Points d'attention sur les templates (`data/pages`):
+
+- le remplacement de jetons `{{...}}` est global: un meme jeton ne doit pas servir a deux valeurs differentes (`{{ACTIVE_PROFILE}}` est reserve a la navigation, le nom du profil de l'accueil utilise `{{PROFILE_NAME}}`);
+- les scripts inline partagent la portee globale: un `const` declare deux fois provoque une erreur de syntaxe qui bloque le second script; les scripts generes en C++ sont encapsules dans une fonction anonyme;
+- l'accueil affiche l'etat des deux sondes via `{{SENSORS_STATUS}}`; la page Profil affiche le graphique des temperatures (`/api/temperature/status`);
+- le fallback C++ de la page Profil n'inclut pas le graphique des temperatures.
+
+Validation des formulaires Profil: adresse de sonde vide ou de 16 caracteres hexadecimaux, nom de 16 caracteres maximum limite a lettres, chiffres, espace, `-` et `_`, adresses differentes pour les deux sondes, seuils IDLE <= MAX. L'etat runtime n'est modifie qu'apres validation complete. Le mot de passe et les cookies ne sont pas ecrits dans les logs.
 
 `src/utils/logger.*` conserve un buffer circulaire en RAM avec les niveaux `TRACE`, `DEBUG`, `INFO`, `WARN` et `ERROR`. Les logs sont rendus dans `/console`.
 
@@ -122,19 +139,18 @@ Les mesures valides sont filtrees avec 90 % de l'ancienne valeur et 10 % de la n
 4. Lecture, validation et filtrage du PWM.
 5. Detection de perte du signal apres 800 ms.
 6. Ajout d'un point dans l'historique toutes les 10 secondes si le signal est valide.
-7. Mise a jour des temperatures toutes les 2 secondes.
+7. Gestion de la conversion des temperatures (requete toutes les 2 secondes, lecture apres 800 ms).
 8. Gestion de la LED thermique et rendu OLED.
 
 ## Interface Web
 
 ### Parametres par defaut
 
-- SSID AP: `PlastationFan`;
-- mot de passe AP: `Pl@ystati0nf@n`;
+- SSID AP: `PlastationPS5`;
+- mot de passe AP et mot de passe Web: definis dans `src/config/web_config.h`;
 - URL: `http://192.168.4.1`;
 - port HTTP: `80`;
-- mot de passe Web: `S0ny`;
-- cookie: `ps-fan_auth=authorized`.
+- cookie: `ps5-fan_auth=authorized`.
 
 ### Routes
 
@@ -143,15 +159,16 @@ Les mesures valides sont filtrees avec 90 % de l'ancienne valeur et 10 % de la n
 | GET | `/` | Login si non authentifie, accueil sinon |
 | GET/POST | `/login` | Formulaire et verification du mot de passe |
 | GET | `/history` | Historique PWM |
-| GET | `/api/history` | PWM courant, maximum, frequence, historique et temperatures en JSON |
-| GET | `/api/temperature/scan` | Detection et JSON des sondes DS18B20 |
+| GET | `/api/history` | PWM courant, maximum, frequence, historique et etat des sondes configurees (nom, detection, temperature) en JSON |
+| GET | `/api/temperature/scan` | Nouvelle detection; JSON des sondes du bus (adresse, temperature) |
+| GET | `/api/temperature/status` | Etat des deux sondes configurees en JSON (utilise par le graphique) |
 | GET | `/profile` | Profils, seuils et sondes |
 | POST | `/profile/apply` | Sauvegarde puis redemarrage |
 | GET | `/profile/apply` | Redirection de compatibilite vers `/profile` |
 | POST | `/profile/reset` | Remise a zero puis redemarrage |
 | GET | `/profile/reset` | Redirection de compatibilite vers `/profile` |
 | GET | `/console` | Logs et parametres |
-| POST | `/console/settings` | Sauvegarde des logs puis redemarrage |
+| POST | `/console/settings` | Sauvegarde des logs (refresh 1, 2, 5 ou 10 s) puis redemarrage |
 | GET | `/assets/style.css` | CSS LittleFS ou fallback compile |
 | GET | `/favicon.ico` | Reponse vide `204` |
 
@@ -161,11 +178,11 @@ Toutes les routes fonctionnelles sauf la connexion exigent le cookie d'authentif
 
 Namespace Preferences: `ps5fan`.
 
-Les cles principales sont `page`, `console_profile`, `icon_mode`, `thr_offset`, `log_level`, `log_refresh`, les seuils PWM `p5_*`, `p4_*`, `p3_*`, les seuils temperature `*_t_idle` et `*_t_max`, ainsi que les adresses, noms et seuils des sondes (`*_s1_*` et `*_s2_*`).
+Les cles principales sont `page`, `console_profile`, `icon_mode`, `thr_offset`, `log_level`, `log_refresh`, les seuils PWM `p5_*`, `p4_*`, `p3_*` (`_i_cool`, `_i_hot`, `_g_cool`), les seuils temperature du profil `<profil>_t_idle` et `<profil>_t_max`, ainsi que les reglages de sondes `<profil>_s1_*` et `<profil>_s2_*` (`addr`, `name`, `t_idle`, `t_max`).
 
-Les cles ESP32 sont limitees a 15 caracteres: l'offset utilise `thr_offset`, et non l'ancien nom `threshold_offset`.
+Les cles ESP32 sont limitees a 15 caracteres: l'offset utilise `thr_offset`, et non l'ancien nom `threshold_offset`; les anciennes cles `temperature_idle` (16 caracteres) et `temperature_max` ne sont plus utilisees. Une chaine vide ecrite avec `putString` retourne 0: ce n'est pas une erreur.
 
-La remise a zero reecrit les seuils par defaut des trois profils, supprime les reglages de sondes, remet l'etat runtime a zero et redemarre l'ESP32-C3.
+La remise a zero reecrit les seuils PWM par defaut des trois profils, supprime les reglages de sondes et de seuils temperature, remet l'etat runtime a zero et redemarre l'ESP32-C3.
 
 ## Configuration et build
 
@@ -192,4 +209,4 @@ Apres une modification de `data/`, reconstruire et televerser LittleFS en plus d
 - Un seul environnement PlatformIO est defini et aucune suite de tests native automatisee n'est fournie.
 - L'authentification repose sur un mot de passe compile et un cookie simple: elle est adaptee a un reseau local isole, pas a Internet.
 - Les logs sont conserves en RAM et sont perdus au redemarrage.
-- Les sondes sont detectees au demarrage ou a la demande et lues periodiquement.
+- Les sondes sont detectees au demarrage ou a la demande et lues periodiquement; un scan manuel bloque la boucle environ 750 ms.

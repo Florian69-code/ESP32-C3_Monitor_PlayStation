@@ -98,6 +98,22 @@ bool parseConsoleProfile(const uint8_t profileValue, ConsoleProfile& profile) {
   }
 }
 
+// Nom de sonde affiche en HTML/JSON : caracteres restreints pour eviter toute injection.
+bool isValidSensorName(const String& name) {
+  if (name.length() > 16) {
+    return false;
+  }
+  for (unsigned int i = 0; i < name.length(); ++i) {
+    const char c = name[i];
+    const bool allowed = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                         c == ' ' || c == '-' || c == '_';
+    if (!allowed) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Prefixe de stockage NVS des seuils associes au profil.
 const char* getProfileStoragePrefix(ConsoleProfile profile) {
   switch (profile) {
@@ -175,34 +191,14 @@ String applyProfileSettings(WebServer& server) {
     return String("ERR:TEMPERATURE_MAX invalide.");
   }
 
-  temperatureIdle = constrain(temperatureIdle, THRESHOLD_MIN, THRESHOLD_MAX);
-  temperatureMax = constrain(temperatureMax, THRESHOLD_MIN, THRESHOLD_MAX);
+  temperatureIdle = constrain(temperatureIdle, TEMPERATURE_MIN, TEMPERATURE_MAX);
+  temperatureMax = constrain(temperatureMax, TEMPERATURE_MIN, TEMPERATURE_MAX);
 
   if (temperatureIdle > temperatureMax) {
     logger::errorf("applyProfileSettings: invalid order: temperature_idle=%f, temperature_max=%f",
         temperatureIdle, temperatureMax);
     return String("ERR:Ordre invalide, attendu: TEMPERATURE_IDLE <= TEMPERATURE_MAX.");
   }
-
-  const String sensor1Address = server.arg("sensor1_address");
-  const String sensor2Address = server.arg("sensor2_address");
-  const String sensor1Name = server.arg("sensor1_name");
-  const String sensor2Name = server.arg("sensor2_name");
-  const float sensor1Idle = server.hasArg("sensor1_idle") ? strtof(server.arg("sensor1_idle").c_str(), nullptr) : temperatureIdle;
-  const float sensor1Max = server.hasArg("sensor1_max") ? strtof(server.arg("sensor1_max").c_str(), nullptr) : temperatureMax;
-  const float sensor2Idle = server.hasArg("sensor2_idle") ? strtof(server.arg("sensor2_idle").c_str(), nullptr) : temperatureIdle;
-  const float sensor2Max = server.hasArg("sensor2_max") ? strtof(server.arg("sensor2_max").c_str(), nullptr) : temperatureMax;
-
-  state.sensorConfig[0].address = sensor1Address;
-  state.sensorConfig[0].name = sensor1Name.length() > 0 ? sensor1Name : "sonde1";
-  state.sensorConfig[0].temperatureIdleThreshold = constrain(sensor1Idle, TEMPERATURE_MIN, TEMPERATURE_MAX);
-  state.sensorConfig[0].temperatureMaxThreshold = constrain(sensor1Max, TEMPERATURE_MIN, TEMPERATURE_MAX);
-  state.sensorConfig[0].enabled = sensor1Address.length() > 0;
-  state.sensorConfig[1].address = sensor2Address;
-  state.sensorConfig[1].name = sensor2Name.length() > 0 ? sensor2Name : "sonde2";
-  state.sensorConfig[1].temperatureIdleThreshold = constrain(sensor2Idle, TEMPERATURE_MIN, TEMPERATURE_MAX);
-  state.sensorConfig[1].temperatureMaxThreshold = constrain(sensor2Max, TEMPERATURE_MIN, TEMPERATURE_MAX);
-  state.sensorConfig[1].enabled = sensor2Address.length() > 0;
 
   // ICONE : Contrôle de cohérence du mode d'affichage des icones.
   uint8_t iconMode = 1;
@@ -213,6 +209,58 @@ String applyProfileSettings(WebServer& server) {
     logger::errorf("applyProfileSettings: failed to parse icon_mode=%s", server.arg("icon_mode").c_str());
     return String("ERR:Mode image invalide.");
   }
+
+  // SONDES : valide tout avant de modifier l'etat runtime.
+  SensorConfig newSensors[2];
+  for (uint8_t i = 0; i < 2; ++i) {
+    const String prefixArg = String("sensor") + String(i + 1);
+    String address = server.arg(prefixArg + "_address");
+    address.trim();
+    address.toUpperCase();
+    String name = server.arg(prefixArg + "_name");
+    name.trim();
+
+    if (address.length() > 0 && !temperature_manager::isValidAddress(address)) {
+      return String("ERR:Adresse sonde ") + String(i + 1) + " invalide.";
+    }
+    if (!isValidSensorName(name)) {
+      return String("ERR:Nom sonde ") + String(i + 1) + " invalide (lettres, chiffres, espace, - et _ ; 16 max).";
+    }
+
+    float idle = temperatureIdle;
+    float maxValue = temperatureMax;
+    if (server.hasArg(prefixArg + "_idle") && !parseFloatArg(server.arg(prefixArg + "_idle"), idle)) {
+      return String("ERR:Seuil IDLE sonde ") + String(i + 1) + " invalide.";
+    }
+    if (server.hasArg(prefixArg + "_max") && !parseFloatArg(server.arg(prefixArg + "_max"), maxValue)) {
+      return String("ERR:Seuil MAX sonde ") + String(i + 1) + " invalide.";
+    }
+    idle = constrain(idle, TEMPERATURE_MIN, TEMPERATURE_MAX);
+    maxValue = constrain(maxValue, TEMPERATURE_MIN, TEMPERATURE_MAX);
+    if (idle > maxValue) {
+      return String("ERR:Sonde ") + String(i + 1) + ": seuil IDLE doit etre <= seuil MAX.";
+    }
+
+    newSensors[i].address = address;
+    newSensors[i].enabled = address.length() > 0;
+    newSensors[i].name = name.length() > 0 ? name : String("sonde") + String(i + 1);
+    newSensors[i].temperatureIdleThreshold = idle;
+    newSensors[i].temperatureMaxThreshold = maxValue;
+  }
+  if (newSensors[0].enabled && newSensors[0].address == newSensors[1].address) {
+    return String("ERR:Les deux sondes ne peuvent pas avoir la meme adresse.");
+  }
+
+  for (uint8_t i = 0; i < 2; ++i) {
+    state.sensorConfig[i].address = newSensors[i].address;
+    state.sensorConfig[i].enabled = newSensors[i].enabled;
+    state.sensorConfig[i].name = newSensors[i].name;
+    state.sensorConfig[i].temperatureIdleThreshold = newSensors[i].temperatureIdleThreshold;
+    state.sensorConfig[i].temperatureMaxThreshold = newSensors[i].temperatureMaxThreshold;
+  }
+  const uint8_t profileIndex = static_cast<uint8_t>(selectedProfile);
+  state.profileThresholds[profileIndex].temperatureIdle = temperatureIdle;
+  state.profileThresholds[profileIndex].temperatureMax = temperatureMax;
 
   Preferences preferences;
   if (!preferences.begin("ps5fan", false)) {
@@ -231,8 +279,6 @@ String applyProfileSettings(WebServer& server) {
   preferences.putFloat(keyIdleCool, idleCoolMax);
   preferences.putFloat(keyIdleHot, gameCoolMax);
   preferences.putFloat(keyGameCool, gameHotMax);
-  preferences.putFloat("temperature_idle", temperatureIdle);
-  preferences.putFloat("temperature_max", temperatureMax);
   preferences.putUChar("icon_mode", iconMode);
   const bool savedSensorConfig = temperature_manager::saveToPreferences(preferences, selectedProfile);
   preferences.end();
@@ -250,12 +296,9 @@ String applyProfileSettings(WebServer& server) {
 
   state.activeProfile = selectedProfile;
   state.iconMode = iconMode;
-  const uint8_t profileIndex = static_cast<uint8_t>(selectedProfile);
   state.profileThresholds[profileIndex].idleCoolMax = idleCoolMax;
   state.profileThresholds[profileIndex].gameCoolMax = gameCoolMax;
   state.profileThresholds[profileIndex].gameHotMax = gameHotMax;
-  state.profileThresholds[profileIndex].temperatureIdle = temperatureIdle;
-  state.profileThresholds[profileIndex].temperatureMax = temperatureMax;
   state.dutyMax = 0.0f;
 
   return String("Parametres sauvegardes. Redemarrage de l'ESP32-C3...");
@@ -277,8 +320,8 @@ String applyConsoleSettings(WebServer& server) {
   if (!parseUInt8Arg(server.arg("refresh_seconds"), refreshRaw)) {
     return String("ERR:Refresh invalide.");
   }
-  if (!(refreshRaw == 1 || refreshRaw == 2 || refreshRaw == 5)) {
-    return String("ERR:Refresh supporte: 1s, 2s ou 5s.");
+  if (!log_config::isSupportedWebRefreshSeconds(refreshRaw)) {
+    return String("ERR:Refresh supporte: 1s, 2s, 5s ou 10s.");
   }
 
   if (!saveWebLogSettings(logLevelRaw, static_cast<uint16_t>(refreshRaw))) {
@@ -398,7 +441,7 @@ String buildHistoryJsonPayload() {
   }
 
   payload += "],\"temperatures\":";
-  payload += String(temperature_manager::getDetectedSensorsJson().c_str());
+  payload += String(buildTemperatureStatusJson().c_str());
   payload += "}";
   return payload;
 }
@@ -408,10 +451,6 @@ bool isAuthorized(WebServer& server) {
   const String cookieHeader = server.header("Cookie");
   const String expectedCookie = getAuthCookieValue();
   const bool authorizedByCookie = cookieHeader.indexOf(expectedCookie) != -1;
-
-  logger::debugf("Cookie header: '%s'", cookieHeader.c_str());
-  logger::debugf("Looking for cookie: '%s'", expectedCookie.c_str());
-  logger::debugf("Memory auth flag: %s", gIsAuthenticated ? "true" : "false");
 
   return gIsAuthenticated || authorizedByCookie;
 }
@@ -464,9 +503,7 @@ void web_ui::initializeRoutes(WebServer& server) {
     enteredPassword.trim();
     const String configuredPassword = String(web_config::WEB_PASSWORD);
 
-    logger::debugf("POST /login - enteredPassword='%s'", enteredPassword.c_str());
-    logger::debugf("configuredPassword='%s'", configuredPassword.c_str());
-    logger::debugf("POST /login - cookie header='%s'", server.header("Cookie").c_str());
+    logger::debug("POST /login");
 
     if (enteredPassword == configuredPassword) {
       const String cookieValue = getAuthCookieValue();
@@ -512,7 +549,6 @@ void web_ui::initializeRoutes(WebServer& server) {
   });
 
   server.on("/api/temperature/status", HTTP_GET, [&server]() {
-    logger::debugf("GET /api/temperature/status - cookie header='%s'", server.header("Cookie").c_str());
     if (!isAuthorized(server)) {
       server.sendHeader("Cache-Control", "no-store");
       server.send(401, "application/json", "{\"error\":\"unauthorized\"}");
@@ -524,7 +560,6 @@ void web_ui::initializeRoutes(WebServer& server) {
   });
 
   server.on("/api/history", HTTP_GET, [&server]() {
-    logger::debugf("GET /api/history - cookie header='%s'", server.header("Cookie").c_str());
     if (!isAuthorized(server)) {
       logger::debug("GET /api/history unauthorized -> 401");
       server.sendHeader("Cache-Control", "no-store");

@@ -157,7 +157,7 @@ void loadPersistedSettings() {
   const uint16_t storedRefreshSeconds = preferences.getUShort(
       "log_refresh",
       log_config::LOG_WEB_REFRESH_SECONDS);
-  if (storedRefreshSeconds == 1 || storedRefreshSeconds == 2 || storedRefreshSeconds == 5) {
+  if (log_config::isSupportedWebRefreshSeconds(storedRefreshSeconds)) {
     getAppState().webLogRefreshSeconds = storedRefreshSeconds;
   } else {
     getAppState().webLogRefreshSeconds = log_config::LOG_WEB_REFRESH_SECONDS;
@@ -284,7 +284,7 @@ bool saveWebLogSettings(const uint8_t logLevel, const uint16_t refreshSeconds) {
     return false;
   }
 
-  if (!(refreshSeconds == 1 || refreshSeconds == 2 || refreshSeconds == 5)) {
+  if (!log_config::isSupportedWebRefreshSeconds(refreshSeconds)) {
     return false;
   }
 

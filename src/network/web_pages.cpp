@@ -135,6 +135,34 @@ String buildNoticeHtml(const String& statusMessage) {
   return String("<div class=\"") + cssClass + "\">" + message + "</div>";
 }
 
+// Une ligne par sonde : nom utilise et etat de connexion (noms valides a la saisie, donc sans echappement).
+String buildSensorsSummaryHtml(const AppState& state) {
+  String html;
+  html.reserve(256);
+  for (uint8_t i = 0; i < 2; ++i) {
+    const SensorConfig& sensor = state.sensorConfig[i];
+    html += "<p>Sonde ";
+    html += String(i + 1);
+    html += " : ";
+    if (sensor.detected) {
+      html += sensor.name;
+      html += " - connectee";
+      if (!isnan(sensor.currentTemperature)) {
+        html += " (";
+        html += String(sensor.currentTemperature, 1);
+        html += " &deg;C)";
+      }
+    } else if (sensor.enabled) {
+      html += sensor.name;
+      html += " - non detectee";
+    } else {
+      html += "non connectee";
+    }
+    html += "</p>";
+  }
+  return html;
+}
+
 String buildFallbackHomeHtml(const AppState& state) {
   const String content = String("<main><h2>Accueil</h2><p>Mode Web actif sur l'ESP32-C3.</p><div class=\"section\"><p>SSID : ") +
                          web_config::WIFI_SSID +
@@ -149,7 +177,9 @@ String buildFallbackHomeHtml(const AppState& state) {
                          "s" +
                          "</p><p>Profil utilise : " +
                          getProfileName(state.activeProfile) +
-                         "</p></div></main>";
+                         "</p>" +
+                         buildSensorsSummaryHtml(state) +
+                         "</div></main>";
   return wrapFallbackPage(web_config::WEB_TITLE, content, true, "active", "", "", "");
 }
 
@@ -159,32 +189,8 @@ String buildTemperatureSectionHtml(const AppState& state) {
   html.reserve(5000);
   html += "<div class=\"section\"><h3>2. Temperature</h3><p class=\"inline-help\">Parametres globaux et detection des sondes DS18B20 branchees sur la broche 4.</p>";
   
-  // Affichage du statut des sondes connectées
-  int connectedCount = 0;
-  String connectedNames = "";
-  if (state.sensorConfig[0].enabled && state.sensorConfig[0].address.length() > 0) {
-    connectedCount++;
-    connectedNames += state.sensorConfig[0].name;
-  }
-  if (state.sensorConfig[1].enabled && state.sensorConfig[1].address.length() > 0) {
-    if (connectedCount > 0) connectedNames += ", ";
-    connectedCount++;
-    connectedNames += state.sensorConfig[1].name;
-  }
-  
-  html += "<div style=\"background: rgba(135, 164, 205, 0.1); padding: 12px; border-radius: 4px; margin-bottom: 16px; border-left: 3px solid #4ad2ff;\"><strong>Sondes detectees:</strong> ";
-  if (connectedCount == 0) {
-    html += "Aucune sonde connectee";
-  } else if (connectedCount == 1) {
-    html += "1 sonde (";
-    html += connectedNames;
-    html += ")";
-  } else {
-    html += connectedCount;
-    html += " sondes (";
-    html += connectedNames;
-    html += ")";
-  }
+  html += "<div style=\"background: rgba(135, 164, 205, 0.1); padding: 12px; border-radius: 4px; margin-bottom: 16px; border-left: 3px solid #4ad2ff;\">";
+  html += buildSensorsSummaryHtml(state);
   html += "</div>";
   html += "<label for=\"temperature_idle\">Seuil Temperature IDLE (°C)</label><input id=\"temperature_idle\" name=\"temperature_idle\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
   html += formatThresholdValue(state.profileThresholds[profileIndex].temperatureIdle);
@@ -220,7 +226,7 @@ String buildTemperatureSectionHtml(const AppState& state) {
   html += formatThresholdValue(state.sensorConfig[1].temperatureIdleThreshold);
   html += "\" required><label for=\"sensor2_max\">Sonde 2 - seuil MAX (°C)</label><input id=\"sensor2_max\" name=\"sensor2_max\" type=\"number\" step=\"0.5\" min=\"0\" max=\"120\" value=\"";
   html += formatThresholdValue(state.sensorConfig[1].temperatureMaxThreshold);
-  html += "\" required></div></div><script>";
+  html += "\" required></div></div><script>(()=>{";
   html += "const detectSensorsBtn=document.getElementById('detectSensorsBtn');";
   html += "const sensorStatus=document.getElementById('sensorStatus');";
   html += "const sensor1Select=document.getElementById('sensor1_address');";
@@ -230,17 +236,22 @@ String buildTemperatureSectionHtml(const AppState& state) {
   html += "  const fillSelect=(select)=>{";
   html += "    if(!select)return;";
   html += "    const currentValue=select.value;";
+  html += "    const entries=Object.keys(sensors).filter(k=>sensors[k]&&sensors[k].address).map(k=>sensors[k]);";
+  html += "    if(currentValue&&!entries.some(e=>e.address===currentValue))entries.push({address:currentValue,temperature:null,missing:true});";
+  html += "    entries.sort((a,b)=>a.address.localeCompare(b.address));";
   html += "    select.innerHTML='';";
   html += "    const placeholder=document.createElement('option');";
   html += "    placeholder.value='';";
   html += "    placeholder.textContent='Aucune';";
   html += "    select.appendChild(placeholder);";
-  html += "    const addresses=Object.keys(sensors).filter(k=>sensors[k]&&sensors[k].address).map(k=>sensors[k].address).sort();";
-  html += "    addresses.forEach((addr)=>{";
+  html += "    entries.forEach((entry)=>{";
   html += "      const item=document.createElement('option');";
-  html += "      item.value=addr;";
-  html += "      item.textContent=addr;";
-  html += "      if(currentValue===addr)item.selected=true;";
+  html += "      item.value=entry.address;";
+  html += "      let label=entry.address;";
+  html += "      if(Number.isFinite(entry.temperature))label+=' ('+entry.temperature.toFixed(1)+' \\u00b0C)';";
+  html += "      else if(entry.missing)label+=' (non detectee)';";
+  html += "      item.textContent=label;";
+  html += "      if(currentValue===entry.address)item.selected=true;";
   html += "      select.appendChild(item);";
   html += "    });";
   html += "  };";
@@ -262,7 +273,7 @@ String buildTemperatureSectionHtml(const AppState& state) {
   html += "  });";
   html += "}";
   html += "if(sensorStatus)sensorStatus.textContent='Utilisez le bouton pour detecter les sondes connectees.';";
-  html += "</script></div>";
+  html += "})();</script></div>";
   return html;
 }
 
@@ -353,7 +364,8 @@ String buildFallbackConsoleHtml(const String& title,
   const String refreshOptions =
       refreshToOption(1, refreshSeconds) +
       refreshToOption(2, refreshSeconds) +
-      refreshToOption(5, refreshSeconds);
+      refreshToOption(5, refreshSeconds) +
+      refreshToOption(10, refreshSeconds);
 
   String content;
   content.reserve(2048 + logContent.length() + statusMessage.length());
@@ -556,7 +568,8 @@ String web_pages::getHomePage(const AppState& state) {
       {"{{WEB_PORT}}", String(web_config::WEB_PORT)},
       {"{{LOG_LEVEL}}", String(getCurrentLogLevelName(state.webLogLevel))},
       {"{{LOG_REFRESH_SECONDS}}", String(state.webLogRefreshSeconds)},
-      {"{{ACTIVE_PROFILE}}", String(getProfileName(state.activeProfile))},
+      {"{{PROFILE_NAME}}", String(getProfileName(state.activeProfile))},
+      {"{{SENSORS_STATUS}}", buildSensorsSummaryHtml(state)},
   };
 
   const String rendered = web_storage::renderTemplate(kPageHome, tokens, sizeof(tokens) / sizeof(tokens[0]));
@@ -648,7 +661,8 @@ String web_pages::getConsolePage(const String& title,
   const String refreshOptions =
     refreshToOption(1, refreshSeconds) +
     refreshToOption(2, refreshSeconds) +
-    refreshToOption(5, refreshSeconds);
+    refreshToOption(5, refreshSeconds) +
+    refreshToOption(10, refreshSeconds);
 
   const web_storage::TemplateToken tokens[] = {
       {"{{TITLE}}", title},

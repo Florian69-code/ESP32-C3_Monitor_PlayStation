@@ -19,4 +19,9 @@ constexpr uint8_t LOG_RING_BUFFER_LINES = 128;
 // Intervalle de rafraichissement de la page web des logs (en secondes).
 constexpr uint16_t LOG_WEB_REFRESH_SECONDS = 5;
 
+// Valeurs de refresh autorisees pour la page console (1s, 2s, 5s, 10s).
+inline bool isSupportedWebRefreshSeconds(uint16_t seconds) {
+  return seconds == 1 || seconds == 2 || seconds == 5 || seconds == 10;
+}
+
 }  // namespace log_config

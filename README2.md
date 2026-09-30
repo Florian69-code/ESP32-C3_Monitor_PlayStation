@@ -14,8 +14,9 @@ Le firmware mesure le signal PWM du ventilateur, calcule le duty-cycle et la fre
 - LED thermique sur GPIO 8.
 - Jusqu'a deux sondes DS18B20 sur GPIO 4.
 - Detection, nommage et seuils individuels des sondes par profil.
+- Graphique Web des temperatures (page Profil) et etat des sondes sur l'accueil.
 - Configuration Web persistante en NVS.
-- Console de logs de `TRACE` a `ERROR`.
+- Console de logs de `TRACE` a `ERROR`, rafraichissement 1, 2, 5 ou 10 s.
 - Pages LittleFS avec fallback HTML/CSS compile.
 
 ## Materiel
@@ -60,22 +61,22 @@ Sous Windows, utiliser au besoin:
 
 Apres le demarrage, connecter l'ordinateur ou le telephone au reseau:
 
-- SSID: `PlastationFan`
-- Mot de passe Wi-Fi: `Pl@ystati0nf@n`
+- SSID: `PlastationPS5`
 - Adresse: `http://192.168.4.1`
-- Mot de passe de la page Web: `S0ny`
-
-Ces informations peuvent être modifié en éditant le fichier /src/config/web_config.h.
-D'autres informatons WEB peuvent être modifié sur cette page.
+- Mot de passe Wi-Fi et mot de passe de la page Web: definis dans `src/config/web_config.h` (a personnaliser).
 
 L'interface WEB propose les pages :
 - Accueil
+    - Parametres actifs (SSID, URL, logs, profil) et etat des deux sondes: nom utilise, connectee ou non, temperature.
 - Historique PWM
-- Temperature
 - Profil
-    - Les changements de profil, seuils PWM, sondes, icône, entrainent un redemarrage.
-    - Possibilité de remettre les valeurs par défaut.
+    - Changement de profil, seuils PWM, icones OLED.
+    - Section Temperature: detection des sondes (adresse et temperature affichees), nom, seuils IDLE/MAX par sonde.
+    - Graphique des temperatures des sondes 1 et 2 (fenetre glissante de 10 minutes, mise a jour toutes les 2 s).
+    - Les changements de profil, seuils PWM, sondes, icone, entrainent un redemarrage.
+    - Possibilite de remettre les valeurs par defaut.
 - Console
+    - Niveau de log et rafraichissement (1, 2, 5 ou 10 s).
 
 ## Utilisation de l'OLED
 
@@ -89,9 +90,14 @@ Le signal PWM est valide apres au moins 10 periodes. Le duty-cycle est filtre av
 
 ## Sondes DS18B20
 
-Les sondes sont recherchees au demarrage sur GPIO 4 et peuvent etre rescanees depuis Profil. Prevoir une resistance de pull-up de 4,7 kOhm sur le bus OneWire.
+Les sondes sont recherchees au demarrage sur GPIO 4 et peuvent etre rescanees depuis Profil (bouton "Detecter les sondes", environ 1 s). Prevoir une resistance de pull-up de 4,7 kOhm sur le bus OneWire.
 
-Depuis la page Profil, il est possible de selectionner l'adresse, le nom, le seuil IDEL et le seuil MAX de chaque sonde. Ces reglages sont geres par profil dans Preferences. La lecture est actualisee toutes les 2 secondes et deux sondes maximum sont gerees.
+Depuis la page Profil, il est possible de selectionner l'adresse, le nom, le seuil IDLE et le seuil MAX de chaque sonde. Ces reglages sont geres par profil dans Preferences.
+
+- La lecture utilise l'adresse choisie; si aucune sonde n'est configuree, les sondes sont attribuees dans l'ordre de decouverte du bus.
+- La conversion 12 bits est lancee toutes les 2 secondes et lue environ 800 ms plus tard.
+- Les noms sont limites a 16 caracteres (lettres, chiffres, espace, `-`, `_`) et les deux sondes doivent avoir des adresses differentes.
+- Les logs n'indiquent que les connexions/deconnexions des sondes.
 
 ## Organisation du projet
 
@@ -108,7 +114,7 @@ Depuis la page Profil, il est possible de selectionner l'adresse, le nom, le seu
 
 ## Depannage rapide
 
-Si les pages Web ne correspondent pas au firmware, reconstruire puis televerser LittleFS avec `uploadfs`. Si le PWM reste absent, verifier le niveau electrique, la masse commune et GPIO 2. Si aucune temperature n'apparait, verifier GPIO 4, la resistance de 4,7 kOhm et l'adresse choisie dans Profil.
+Si les pages Web ne correspondent pas au firmware, reconstruire puis televerser LittleFS avec `uploadfs`. Sans LittleFS, le fallback C++ est utilise et n'inclut pas le graphique des temperatures. Si le PWM reste absent, verifier le niveau electrique, la masse commune et GPIO 2. Si aucune temperature n'apparait, verifier GPIO 4, la resistance de 4,7 kOhm et l'adresse choisie dans Profil.
 
 La configuration persistante peut etre remise a zero depuis Profil. Cette operation restaure les seuils des trois profils, supprime la configuration des sondes et redemarre la carte.
 
