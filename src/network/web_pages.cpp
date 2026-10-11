@@ -266,7 +266,7 @@ String buildTemperatureSectionHtml(const AppState& state) {
   html += "      if(!response.ok)throw new Error('HTTP '+response.status);";
   html += "      const payload=await response.json();";
   html += "      populateSensorOptions(payload);";
-  html += "      sensorStatus.textContent='Sondes detectees. Selectionnez la bonne adresse puis sauvegardez.';";
+  html += "      sensorStatus.textContent=Object.keys(payload).length>0?'Sondes detectees. Selectionnez la bonne adresse puis sauvegardez.':'Aucune sonde trouvee. Consultez la console (niveau DEBUG) pour le diagnostic.';";
   html += "    }catch(error){";
   html += "      sensorStatus.textContent='Detection impossible: '+error.message;";
   html += "    }";
@@ -379,7 +379,7 @@ String buildFallbackConsoleHtml(const String& title,
   content += refreshOptions;
   content += "</select></div></div><div class=\"btn-row\"><button class=\"primary\" type=\"submit\">Enregistrer + Redemarrer</button></div></form></section><div class=\"log-box\">";
   content += logContent.length() > 0 ? logContent : String("<p>Aucun log pour le moment.</p>");
-  content += "</div></main>";
+  content += "</div><script>(()=>{const box=document.querySelector('.log-box');const key='consoleScroll';const nb=(v,t,s)=>t-s-v<24;let saved=null;try{saved=JSON.parse(sessionStorage.getItem(key));}catch(e){}if('scrollRestoration' in history)history.scrollRestoration='manual';if(box){box.scrollTop=(!saved||saved.boxBottom)?box.scrollHeight:saved.boxTop;}if(saved){window.scrollTo(0,saved.pageBottom?document.documentElement.scrollHeight:saved.pageTop);}window.addEventListener('pagehide',()=>{const d=document.documentElement;const st={pageTop:window.scrollY,pageBottom:nb(window.innerHeight,d.scrollHeight,window.scrollY),boxTop:box?box.scrollTop:0,boxBottom:box?nb(box.clientHeight,box.scrollHeight,box.scrollTop):true};try{sessionStorage.setItem(key,JSON.stringify(st));}catch(e){}});})();</script></main>";
   return wrapFallbackPage(title, content, true, "", "", "", "active");
 }
 

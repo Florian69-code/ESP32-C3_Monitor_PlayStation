@@ -44,5 +44,31 @@
       {{LOG_CONTENT}}
     </div>
   </div>
+  <script>
+    (() => {
+      const box = document.querySelector('.log-box');
+      const key = 'consoleScroll';
+      const nearBottom = (view, total, top) => total - top - view < 24;
+      let saved = null;
+      try { saved = JSON.parse(sessionStorage.getItem(key)); } catch (e) {}
+      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+      if (box) {
+        box.scrollTop = (!saved || saved.boxBottom) ? box.scrollHeight : saved.boxTop;
+      }
+      if (saved) {
+        window.scrollTo(0, saved.pageBottom ? document.documentElement.scrollHeight : saved.pageTop);
+      }
+      window.addEventListener('pagehide', () => {
+        const doc = document.documentElement;
+        const state = {
+          pageTop: window.scrollY,
+          pageBottom: nearBottom(window.innerHeight, doc.scrollHeight, window.scrollY),
+          boxTop: box ? box.scrollTop : 0,
+          boxBottom: box ? nearBottom(box.clientHeight, box.scrollHeight, box.scrollTop) : true
+        };
+        try { sessionStorage.setItem(key, JSON.stringify(state)); } catch (e) {}
+      });
+    })();
+  </script>
 </body>
 </html>

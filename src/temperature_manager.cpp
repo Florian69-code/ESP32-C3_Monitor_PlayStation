@@ -135,9 +135,61 @@ void readTemperatures() {
   }
 }
 
+// Diagnostic bas niveau du bus 1-Wire (logs DEBUG) pour localiser une panne de cablage.
+void diagnoseBus() {
+  pinMode(SONDES_PIN, INPUT);
+  delay(2);
+  const int levelNoPullup = digitalRead(SONDES_PIN);
+  pinMode(SONDES_PIN, INPUT_PULLUP);
+  delay(2);
+  const int levelInternalPullup = digitalRead(SONDES_PIN);
+  logger::debugf("[TEMP][DIAG] idle level: no pull-up=%d, internal pull-up=%d (attendu: 1 et 1)",
+                 levelNoPullup, levelInternalPullup);
+  if (levelInternalPullup == 0) {
+    logger::warn("[TEMP][DIAG] DATA bloque a 0 : court-circuit vers GND, ou sonde alimentee a l'envers (GND/3V inverses)");
+  } else if (levelNoPullup == 0) {
+    logger::warn("[TEMP][DIAG] pas de pull-up externe : la resistance n'est pas reliee entre 3V et DATA");
+  }
+
+  // Temps de remontee du bus apres un niveau bas : long = pas de pull-up externe.
+  pinMode(SONDES_PIN, OUTPUT);
+  digitalWrite(SONDES_PIN, LOW);
+  delayMicroseconds(200);
+  noInterrupts();
+  pinMode(SONDES_PIN, INPUT);
+  const uint32_t startUs = micros();
+  while (digitalRead(SONDES_PIN) == 0 && micros() - startUs < 2000) {
+  }
+  const uint32_t riseUs = micros() - startUs;
+  interrupts();
+  logger::debugf("[TEMP][DIAG] rise time after LOW: %lu us (4.7k attendu < 20 us, >= 2000 = pas de pull-up)",
+                 static_cast<unsigned long>(riseUs));
+
+  pinMode(SONDES_PIN, INPUT_PULLUP);
+  for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
+    const uint8_t presence = oneWire.reset();
+    logger::debugf("[TEMP][DIAG] reset attempt %u -> presence pulse=%u", attempt, presence);
+    delay(5);
+  }
+
+  oneWire.reset_search();
+  uint8_t rom[8];
+  uint8_t found = 0;
+  while (oneWire.search(rom) && found < 8) {
+    const bool crcOk = OneWire::crc8(rom, 7) == rom[7];
+    logger::debugf("[TEMP][DIAG] raw ROM %u: %02X%02X%02X%02X%02X%02X%02X%02X family=0x%02X crc=%s", found + 1,
+                   rom[0], rom[1], rom[2], rom[3], rom[4], rom[5], rom[6], rom[7], rom[0], crcOk ? "OK" : "KO");
+    ++found;
+  }
+  oneWire.reset_search();
+  logger::debugf("[TEMP][DIAG] raw search found %u device(s)", found);
+}
+
 void discoverSensors() {
   discoveredCount = 0;
   logger::debugf("[TEMP] discoverSensors() on pin %u", SONDES_PIN);
+
+  diagnoseBus();
 
   pinMode(SONDES_PIN, INPUT_PULLUP);
   sensors.begin();
@@ -182,6 +234,7 @@ void readDiscoveredTemperatures() {
   for (uint8_t i = 0; i < discoveredCount; ++i) {
     const float value = sensors.getTempC(discoveredAddresses[i]);
     discoveredTemperatures[i] = value != DEVICE_DISCONNECTED_C ? value : NAN;
+    logger::debugf("[TEMP] sensor %u raw temperature=%.2f", static_cast<unsigned>(i + 1), value);
   }
 }
 
