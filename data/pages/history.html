@@ -13,7 +13,7 @@
     </header>
     <nav>
       <a class="{{ACTIVE_HOME}}" href="/">Accueil</a>
-      <a class="{{ACTIVE_HISTORY}}" href="/history">Historique PWM</a>
+      <a class="{{ACTIVE_HISTORY}}" href="/history">Graphiques</a>
       <a class="{{ACTIVE_PROFILE}}" href="/profile">Profil</a>
       <a class="{{ACTIVE_CONSOLE}}" href="/console">Console</a>
     </nav>
@@ -48,6 +48,11 @@
           <p class="inline-help">Le graphe conserve un point par seconde pendant toute la session Web. La plage 1 min decale automatiquement la fenetre au fil du temps.</p>
         </section>
       </div>
+      <section class="section">
+        <h2>Sonde</h2>
+        <p class="inline-help" id="temperatureChartStatus">Verification des sondes...</p>
+        <canvas id="temperatureChart" width="900" height="320" style="width:100%;height:auto;display:none;"></canvas>
+      </section>
     </main>
   </div>
 
@@ -266,6 +271,161 @@
 
     refreshHistory();
     setInterval(refreshHistory, 1000);
+
+    const temperatureCanvas = document.getElementById('temperatureChart');
+    const temperatureChartStatus = document.getElementById('temperatureChartStatus');
+    const temperatureCtx = temperatureCanvas.getContext('2d');
+    const temperatureSessionStartMs = Date.now();
+    const temperatureSamples = [];
+    const sensorLabels = ['Sonde 1', 'Sonde 2'];
+    let temperatureRefreshInFlight = false;
+
+    function getTemperatureElapsedSeconds() {
+      return Math.max(0, Math.floor((Date.now() - temperatureSessionStartMs) / 1000));
+    }
+
+    function parseTemperatureValue(value) {
+      return value === null || value === undefined || value === '' ? Number.NaN : Number(value);
+    }
+
+    function drawTemperatureChart() {
+      const width = temperatureCanvas.width;
+      const height = temperatureCanvas.height;
+      const left = 56;
+      const right = width - 14;
+      const top = 28;
+      const bottom = height - 36;
+      const graphWidth = right - left;
+      const graphHeight = bottom - top;
+      const visibleStart = Math.max(0, getTemperatureElapsedSeconds() - 600);
+      const visibleEnd = Math.max(1, getTemperatureElapsedSeconds());
+      const visibleSamples = temperatureSamples.filter((sample) => sample.second >= visibleStart && sample.second <= visibleEnd);
+      const values = [];
+      for (const sample of visibleSamples) {
+        if (Number.isFinite(sample.sensor1)) {
+          values.push(sample.sensor1);
+        }
+        if (Number.isFinite(sample.sensor2)) {
+          values.push(sample.sensor2);
+        }
+      }
+
+      temperatureCtx.clearRect(0, 0, width, height);
+      temperatureCtx.fillStyle = 'rgba(3, 8, 15, 0.85)';
+      temperatureCtx.fillRect(0, 0, width, height);
+
+      if (values.length === 0) {
+        return;
+      }
+
+      let minValue = Math.floor(Math.min(...values) - 1);
+      let maxValue = Math.ceil(Math.max(...values) + 1);
+      if (minValue === maxValue) {
+        minValue -= 1;
+        maxValue += 1;
+      }
+
+      temperatureCtx.strokeStyle = 'rgba(135, 164, 205, 0.24)';
+      temperatureCtx.lineWidth = 1;
+      temperatureCtx.fillStyle = '#a2b4cd';
+      temperatureCtx.font = '12px monospace';
+      for (let tickValue = minValue; tickValue <= maxValue; tickValue += 2) {
+        const y = bottom - ((tickValue - minValue) / (maxValue - minValue)) * graphHeight;
+        temperatureCtx.beginPath();
+        temperatureCtx.moveTo(left, y);
+        temperatureCtx.lineTo(right, y);
+        temperatureCtx.stroke();
+        temperatureCtx.fillText(`${tickValue}°`, 6, y + 4);
+      }
+
+      const spanSeconds = Math.max(1, visibleEnd - visibleStart);
+      const drawSeries = (key, color) => {
+        temperatureCtx.strokeStyle = color;
+        temperatureCtx.lineWidth = 2;
+        temperatureCtx.beginPath();
+        let started = false;
+        for (const sample of visibleSamples) {
+          const value = sample[key];
+          if (!Number.isFinite(value)) {
+            started = false;
+            continue;
+          }
+          const x = left + ((sample.second - visibleStart) / spanSeconds) * graphWidth;
+          const y = bottom - ((value - minValue) / (maxValue - minValue)) * graphHeight;
+          if (started) {
+            temperatureCtx.lineTo(x, y);
+          } else {
+            temperatureCtx.moveTo(x, y);
+            started = true;
+          }
+        }
+        temperatureCtx.stroke();
+      };
+
+      drawSeries('sensor1', '#4ad2ff');
+      drawSeries('sensor2', '#8dffb2');
+      let legendX = left;
+      [['#4ad2ff', 0], ['#8dffb2', 1]].forEach(([color, index]) => {
+        temperatureCtx.fillStyle = color;
+        temperatureCtx.fillRect(legendX, 10, 10, 10);
+        temperatureCtx.fillStyle = '#a2b4cd';
+        temperatureCtx.fillText(sensorLabels[index], legendX + 16, 19);
+        legendX += 16 + temperatureCtx.measureText(sensorLabels[index]).width + 20;
+      });
+      temperatureCtx.fillText(`Fenetre: ${Math.floor(visibleStart)}s -> ${Math.floor(visibleEnd)}s`, left, height - 18);
+    }
+
+    async function refreshTemperatures() {
+      if (temperatureRefreshInFlight) {
+        return;
+      }
+
+      temperatureRefreshInFlight = true;
+      try {
+        const response = await fetch('/api/temperature/status', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const sensor1 = payload['0'] || {};
+        const sensor2 = payload['1'] || {};
+        const detectedSensors = [sensor1, sensor2]
+          .map((sensor, index) => ({ sensor, index }))
+          .filter(({ sensor }) => sensor.detected);
+        if (detectedSensors.length === 0) {
+          temperatureCanvas.style.display = 'none';
+          temperatureChartStatus.textContent = 'Aucune sonde présente ou détectée.';
+          return;
+        }
+
+        const sensor1Temperature = sensor1.detected ? parseTemperatureValue(sensor1.temperature) : Number.NaN;
+        const sensor2Temperature = sensor2.detected ? parseTemperatureValue(sensor2.temperature) : Number.NaN;
+        sensorLabels[0] = sensor1.name || 'Sonde 1';
+        sensorLabels[1] = sensor2.name || 'Sonde 2';
+        const second = getTemperatureElapsedSeconds();
+        const lastSample = temperatureSamples[temperatureSamples.length - 1];
+        if (lastSample && lastSample.second === second) {
+          lastSample.sensor1 = sensor1Temperature;
+          lastSample.sensor2 = sensor2Temperature;
+        } else {
+          temperatureSamples.push({ second, sensor1: sensor1Temperature, sensor2: sensor2Temperature });
+        }
+
+        temperatureCanvas.style.display = 'block';
+        temperatureChartStatus.textContent = detectedSensors
+          .map(({ sensor, index }) => `${sensor.name || `Sonde ${index + 1}`}: ${Number.isFinite(parseTemperatureValue(sensor.temperature)) ? `${parseTemperatureValue(sensor.temperature).toFixed(1)} °C` : 'N/A'}`)
+          .join(' | ');
+        drawTemperatureChart();
+      } catch (error) {
+        temperatureChartStatus.textContent = `Erreur de lecture des temperatures: ${error.message}`;
+      } finally {
+        temperatureRefreshInFlight = false;
+      }
+    }
+
+    refreshTemperatures();
+    setInterval(refreshTemperatures, 2000);
   </script>
 </body>
 </html>

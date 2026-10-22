@@ -68,11 +68,12 @@ Apres le demarrage, connecter l'ordinateur ou le telephone au reseau:
 L'interface WEB propose les pages :
 - Accueil
     - Parametres actifs (SSID, URL, logs, profil) et etat des deux sondes: nom utilise, connectee ou non, temperature.
-- Historique PWM
+- Graphiques
+    - Historique PWM et valeurs en direct.
+    - Section Sonde: informations et graphiques des deux sondes detectees.
 - Profil
     - Changement de profil, seuils PWM, icones OLED.
     - Section Temperature: detection des sondes (adresse et temperature affichees), nom, seuils IDLE/MAX par sonde.
-    - Graphique des temperatures des sondes 1 et 2 (fenetre glissante de 10 minutes, mise a jour toutes les 2 s).
     - Les changements de profil, seuils PWM, sondes, icone, entrainent un redemarrage.
     - Possibilite de remettre les valeurs par defaut.
 - Console

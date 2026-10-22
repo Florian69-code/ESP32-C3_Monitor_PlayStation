@@ -22,7 +22,7 @@ Le firmware mesure le duty-cycle du ventilateur, filtre les valeurs et affiche l
 - Navigation OLED avec bouton (appui court / long).
 - 5 pages OLED + ecrans d'erreur (WiFi/PWM absent).
 - Historique PWM (72 points en buffer).
-- Interface Web locale: login, accueil, historique, profil, console logs.
+- Interface Web locale: login, accueil, graphiques, profil, console logs.
 - Sauvegarde des reglages en NVS (Preferences).
 
 ## Cablage par defaut

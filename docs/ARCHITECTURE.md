@@ -158,7 +158,7 @@ Validation des formulaires Profil: adresse de sonde vide ou de 16 caracteres hex
 | --- | --- | --- |
 | GET | `/` | Login si non authentifie, accueil sinon |
 | GET/POST | `/login` | Formulaire et verification du mot de passe |
-| GET | `/history` | Historique PWM |
+| GET | `/history` | Graphiques (historique PWM et sondes) |
 | GET | `/api/history` | PWM courant, maximum, frequence, historique et etat des sondes configurees (nom, detection, temperature) en JSON |
 | GET | `/api/temperature/scan` | Nouvelle detection; JSON des sondes du bus (adresse, temperature) |
 | GET | `/api/temperature/status` | Etat des deux sondes configurees en JSON (utilise par le graphique) |
