@@ -51,21 +51,23 @@ void loadThresholdPresetForProfile(ConsoleProfile profile) {
   const char* prefix = getProfileStoragePrefix(profile);
   const uint8_t idx = profileToIndex(profile);
 
+  // Les noms de cles NVS historiques sont conserves pour ne pas perdre les reglages:
+  // "_i_hot" stocke gameCoolMax et "_g_cool" stocke gameHotMax.
   char keyIdleCool[16];
-  char keyIdleHot[16];
-  char keyGameCool[16];
+  char keyGameCoolMax[16];
+  char keyGameHotMax[16];
   char keyTemperatureIdle[16];
   char keyTemperatureMax[16];
   snprintf(keyIdleCool, sizeof(keyIdleCool), "%s_i_cool", prefix);
-  snprintf(keyIdleHot, sizeof(keyIdleHot), "%s_i_hot", prefix);
-  snprintf(keyGameCool, sizeof(keyGameCool), "%s_g_cool", prefix);
+  snprintf(keyGameCoolMax, sizeof(keyGameCoolMax), "%s_i_hot", prefix);
+  snprintf(keyGameHotMax, sizeof(keyGameHotMax), "%s_g_cool", prefix);
   snprintf(keyTemperatureIdle, sizeof(keyTemperatureIdle), "%s_t_idle", prefix);
   snprintf(keyTemperatureMax, sizeof(keyTemperatureMax), "%s_t_max", prefix);
 
   auto& thresholds = getAppState().profileThresholds[idx];
   thresholds.idleCoolMax = preferences.getFloat(keyIdleCool, defaults.idleCoolMax);
-  thresholds.gameCoolMax = preferences.getFloat(keyIdleHot, defaults.gameCoolMax);
-  thresholds.gameHotMax = preferences.getFloat(keyGameCool, defaults.gameHotMax);
+  thresholds.gameCoolMax = preferences.getFloat(keyGameCoolMax, defaults.gameCoolMax);
+  thresholds.gameHotMax = preferences.getFloat(keyGameHotMax, defaults.gameHotMax);
   thresholds.temperatureIdle = preferences.getFloat(keyTemperatureIdle, defaults.temperatureIdle);
   thresholds.temperatureMax = preferences.getFloat(keyTemperatureMax, defaults.temperatureMax);
 }
@@ -204,8 +206,64 @@ void initializeApp() {
   temperature_manager::initialize();
 }
 
+// Evalue les alertes (surchauffe sonde, ventilateur au maximum prolonge).
+void updateAlerts(const uint32_t nowMs) {
+  static uint32_t fanHighSinceMs = 0;
+  auto& state = getAppState();
+  const uint8_t profileIdx = profileToIndex(state.activeProfile);
+
+  int8_t hotSensor = -1;
+  float hotTemperature = NAN;
+  for (uint8_t i = 0; i < 2; ++i) {
+    const auto& sensor = state.sensorConfig[i];
+    if (!sensor.enabled || isnan(sensor.currentTemperature)) {
+      continue;
+    }
+
+    const float limit = sensor.temperatureMaxThreshold > 0.0f
+                            ? sensor.temperatureMaxThreshold
+                            : state.profileThresholds[profileIdx].temperatureMax;
+    const float release = state.alertOverheat ? limit - ALERT_TEMP_HYSTERESIS : limit;
+    if (sensor.currentTemperature >= release && (hotSensor < 0 || sensor.currentTemperature > hotTemperature)) {
+      hotSensor = static_cast<int8_t>(i);
+      hotTemperature = sensor.currentTemperature;
+    }
+  }
+
+  bool fanHigh = false;
+  if (state.pwmDetected && state.dutyFiltered > getActiveGameHotMax() + ALERT_FAN_HIGH_MARGIN) {
+    if (fanHighSinceMs == 0) {
+      fanHighSinceMs = nowMs;
+    }
+    fanHigh = nowMs - fanHighSinceMs >= ALERT_FAN_HIGH_MS;
+  } else {
+    fanHighSinceMs = 0;
+  }
+
+  const bool overheat = hotSensor >= 0;
+  if (overheat && !state.alertOverheat) {
+    logger::warnf("[ALERT] overheat sensor=%d temp=%.1f", hotSensor, hotTemperature);
+  }
+  if (fanHigh && !state.alertFanHigh) {
+    logger::warnf("[ALERT] fan at max for %lus duty=%.1f", static_cast<unsigned long>(ALERT_FAN_HIGH_MS / 1000), state.dutyFiltered);
+  }
+
+  state.alertOverheat = overheat;
+  state.alertFanHigh = fanHigh;
+  state.alertSensorIndex = hotSensor;
+  state.alertTemperature = hotTemperature;
+  if (!overheat && !fanHigh) {
+    state.alertAcknowledged = false;
+  }
+}
+
 void handleShortPress() {
   auto& state = getAppState();
+
+  if ((state.alertOverheat || state.alertFanHigh) && !state.alertAcknowledged) {
+    state.alertAcknowledged = true;
+    return;
+  }
 
   const uint8_t nextPage = (static_cast<uint8_t>(state.currentPage) + 1) % static_cast<uint8_t>(DisplayPage::Count);
   state.currentPage = static_cast<DisplayPage>(nextPage);
@@ -352,15 +410,15 @@ bool resetProfilePageSettingsToDefaults() {
     const char* prefix = getProfileStoragePrefix(profile);
 
     char keyIdleCool[16];
-    char keyIdleHot[16];
-    char keyGameCool[16];
+    char keyGameCoolMax[16];
+    char keyGameHotMax[16];
     snprintf(keyIdleCool, sizeof(keyIdleCool), "%s_i_cool", prefix);
-    snprintf(keyIdleHot, sizeof(keyIdleHot), "%s_i_hot", prefix);
-    snprintf(keyGameCool, sizeof(keyGameCool), "%s_g_cool", prefix);
+    snprintf(keyGameCoolMax, sizeof(keyGameCoolMax), "%s_i_hot", prefix);
+    snprintf(keyGameHotMax, sizeof(keyGameHotMax), "%s_g_cool", prefix);
 
     writeOk = writeAndVerifyFloat(keyIdleCool, defaults.idleCoolMax) && writeOk;
-    writeOk = writeAndVerifyFloat(keyIdleHot, defaults.gameCoolMax) && writeOk;
-    writeOk = writeAndVerifyFloat(keyGameCool, defaults.gameHotMax) && writeOk;
+    writeOk = writeAndVerifyFloat(keyGameCoolMax, defaults.gameCoolMax) && writeOk;
+    writeOk = writeAndVerifyFloat(keyGameHotMax, defaults.gameHotMax) && writeOk;
   }
 
   return writeOk;
@@ -407,6 +465,7 @@ void updateApp() {
   }
 
   temperature_manager::update();
+  updateAlerts(nowMs);
   updateLedState();
   drawCurrentPage();
 }

@@ -19,6 +19,12 @@ constexpr uint32_t BUTTON_DEBOUNCE_MS = 180; // Filtre anti-rebond pour le bouto
 constexpr uint32_t BUTTON_LONG_PRESS_MS = 800; // Seuil pour considerer un appui long.
 constexpr uint32_t SIGNAL_LOST_MS = 800; // Delai sans impulsion avant perte de signal PWM.
 
+// === Alertes ===
+constexpr float ALERT_FAN_HIGH_MARGIN = 10.0f; // Marge (%) au-dessus de GAME HOT max pour considerer le ventilateur au maximum.
+constexpr uint32_t ALERT_FAN_HIGH_MS = 60000; // Duree continue au-dessus de la marge avant alerte ventilateur.
+constexpr float ALERT_TEMP_HYSTERESIS = 2.0f; // Hysteresis (°C) pour lever l'alerte temperature.
+constexpr uint32_t ALERT_BLINK_MS = 500; // Periode de clignotement de l'ecran d'alerte.
+
 // === Graphe d'historique ===
 constexpr uint8_t GRAPH_POINTS = 72; // Taille totale du buffer d'historique.
 constexpr uint8_t GRAPH_VISIBLE_POINTS = 30; // Nombre de points affiches a l'ecran.

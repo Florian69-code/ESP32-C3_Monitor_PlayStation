@@ -61,6 +61,15 @@ struct AppState {
   bool sonde1Detected = false;
   bool sonde2Detected = false;
 
+  // Alertes: surchauffe (sonde >= seuil max) et ventilateur au maximum trop longtemps.
+  bool alertOverheat = false;
+  bool alertFanHigh = false;
+  // Index de la sonde en surchauffe (-1 si aucune) et sa temperature.
+  int8_t alertSensorIndex = -1;
+  float alertTemperature = NAN;
+  // Acquittement par appui bouton: valable tant que l'alerte reste active.
+  bool alertAcknowledged = false;
+
   // Historique PWM pour graphe OLED/Web.
   float dutyHistory[GRAPH_POINTS] = {};
   // Seuils par profil console.

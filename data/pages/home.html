@@ -29,7 +29,43 @@
         <p>Profil utilise : {{PROFILE_NAME}}</p>
         {{SENSORS_STATUS}}
       </div>
+      <div id="alertBanner" class="section" style="display:none;border:1px solid #ff5a5a;color:#ff8a8a"></div>
+      <div class="section">
+        <h3>Etat en direct</h3>
+        <p>PWM : <strong id="liveDuty">--</strong> (max <span id="liveMax">--</span>) - <span id="liveFreq">--</span></p>
+        <p>Sonde 1 : <strong id="liveT0">--</strong> | Sonde 2 : <strong id="liveT1">--</strong></p>
+        <p>Uptime : <span id="liveUptime">--</span></p>
+      </div>
     </main>
   </div>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const fmt = (v, unit) => (v === null || v === undefined) ? '--' : v.toFixed(1) + unit;
+      async function refresh() {
+        try {
+          const r = await fetch('/api/status', { cache: 'no-store' });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const s = await r.json();
+          $('liveDuty').textContent = s.pwm_detected ? fmt(s.duty, ' %') : 'pas de signal';
+          $('liveMax').textContent = fmt(s.duty_max, ' %');
+          $('liveFreq').textContent = s.pwm_detected ? s.frequency_hz.toFixed(0) + ' Hz' : '--';
+          [0, 1].forEach((i) => {
+            const t = s.temperatures[i];
+            $('liveT' + i).textContent = t && t.enabled ? fmt(t.temperature, ' \u00b0C') : 'inactive';
+          });
+          const m = Math.floor(s.uptime_s / 60);
+          $('liveUptime').textContent = Math.floor(m / 60) + 'h ' + (m % 60) + 'min';
+          const msgs = [];
+          if (s.alerts.overheat) msgs.push('SURCHAUFFE sonde ' + (s.alerts.sensor + 1) + ' : ' + fmt(s.alerts.temperature, ' \u00b0C'));
+          if (s.alerts.fan_high) msgs.push('Ventilateur au maximum depuis trop longtemps');
+          $('alertBanner').style.display = msgs.length ? 'block' : 'none';
+          $('alertBanner').textContent = msgs.join(' | ');
+        } catch (e) { /* prochaine tentative au tick suivant */ }
+      }
+      refresh();
+      setInterval(refresh, 2000);
+    })();
+  </script>
 </body>
 </html>

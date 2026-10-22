@@ -269,16 +269,17 @@ String applyProfileSettings(WebServer& server) {
 
   const char* prefix = getProfileStoragePrefix(selectedProfile);
   char keyIdleCool[16];
-  char keyIdleHot[16];
-  char keyGameCool[16];
+  // Cles NVS historiques conservees: "_i_hot" = gameCoolMax, "_g_cool" = gameHotMax.
+  char keyGameCoolMax[16];
+  char keyGameHotMax[16];
   snprintf(keyIdleCool, sizeof(keyIdleCool), "%s_i_cool", prefix);
-  snprintf(keyIdleHot, sizeof(keyIdleHot), "%s_i_hot", prefix);
-  snprintf(keyGameCool, sizeof(keyGameCool), "%s_g_cool", prefix);
+  snprintf(keyGameCoolMax, sizeof(keyGameCoolMax), "%s_i_hot", prefix);
+  snprintf(keyGameHotMax, sizeof(keyGameHotMax), "%s_g_cool", prefix);
 
   preferences.putUChar("console_profile", static_cast<uint8_t>(selectedProfile));
   preferences.putFloat(keyIdleCool, idleCoolMax);
-  preferences.putFloat(keyIdleHot, gameCoolMax);
-  preferences.putFloat(keyGameCool, gameHotMax);
+  preferences.putFloat(keyGameCoolMax, gameCoolMax);
+  preferences.putFloat(keyGameHotMax, gameHotMax);
   preferences.putUChar("icon_mode", iconMode);
   const bool savedSensorConfig = temperature_manager::saveToPreferences(preferences, selectedProfile);
   preferences.end();
@@ -446,6 +447,50 @@ String buildHistoryJsonPayload() {
   return payload;
 }
 
+// Construit la reponse JSON de l'endpoint /api/status (etat live complet).
+String buildStatusJsonPayload() {
+  auto& state = getAppState();
+  const char* profileName = "PS5 FAT";
+  if (state.activeProfile == ConsoleProfile::PS4_PRO) {
+    profileName = "PS4 PRO";
+  } else if (state.activeProfile == ConsoleProfile::PS3_FAT) {
+    profileName = "PS3 FAT";
+  }
+
+  String payload;
+  payload.reserve(640);
+  payload += "{\"uptime_s\":";
+  payload += String(static_cast<unsigned long>(millis() / 1000UL));
+  payload += ",\"profile\":\"";
+  payload += profileName;
+  payload += "\",\"pwm_detected\":";
+  payload += state.pwmDetected ? "true" : "false";
+  payload += ",\"duty\":";
+  payload += String(state.dutyFiltered, 1);
+  payload += ",\"duty_max\":";
+  payload += String(state.dutyMax, 1);
+  payload += ",\"frequency_hz\":";
+  payload += String(state.frequencyFiltered, 1);
+  payload += ",\"wifi_connected\":";
+  payload += state.wifiConnected ? "true" : "false";
+  payload += ",\"alerts\":{\"overheat\":";
+  payload += state.alertOverheat ? "true" : "false";
+  payload += ",\"fan_high\":";
+  payload += state.alertFanHigh ? "true" : "false";
+  payload += ",\"sensor\":";
+  payload += String(static_cast<int>(state.alertSensorIndex));
+  payload += ",\"temperature\":";
+  if (isnan(state.alertTemperature)) {
+    payload += "null";
+  } else {
+    payload += String(state.alertTemperature, 1);
+  }
+  payload += "},\"temperatures\":";
+  payload += buildTemperatureStatusJson();
+  payload += "}";
+  return payload;
+}
+
 // Verifie l'authentification en memoire et/ou par cookie HTTP.
 bool isAuthorized(WebServer& server) {
   const String cookieHeader = server.header("Cookie");
@@ -557,6 +602,17 @@ void web_ui::initializeRoutes(WebServer& server) {
 
     server.sendHeader("Cache-Control", "no-store");
     server.send(200, "application/json", buildTemperatureStatusJson());
+  });
+
+  server.on("/api/status", HTTP_GET, [&server]() {
+    if (!isAuthorized(server)) {
+      server.sendHeader("Cache-Control", "no-store");
+      server.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+      return;
+    }
+
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", buildStatusJsonPayload());
   });
 
   server.on("/api/history", HTTP_GET, [&server]() {

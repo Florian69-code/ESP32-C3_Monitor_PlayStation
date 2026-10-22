@@ -411,9 +411,41 @@ void drawProfilePage() {
   drawProfileImageScreen();
 }
 
+// Affiche une alerte clignotante (surchauffe prioritaire sur ventilateur au maximum).
+void drawAlertScreen() {
+  auto& state = getAppState();
+  const bool inverted = (millis() / ALERT_BLINK_MS) % 2 == 0;
+
+  display.clearBuffer();
+  if (inverted) {
+    display.drawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    display.setDrawColor(0);
+  }
+
+  display.setFont(u8g2_font_7x13B_tf);
+  char line[16];
+  if (state.alertOverheat) {
+    drawCenteredText("SURCHAUFFE", 13);
+    snprintf(line, sizeof(line), "S%d %.0f C", state.alertSensorIndex + 1, state.alertTemperature);
+    drawCenteredText(line, 28);
+  } else {
+    drawCenteredText("FAN MAX", 13);
+    snprintf(line, sizeof(line), "%.0f %%", state.dutyFiltered);
+    drawCenteredText(line, 28);
+  }
+
+  display.setDrawColor(1);
+  display.sendBuffer();
+}
+
 // Sélectionne la page d'affichage active selon l'état courant du système.
 void drawCurrentPage() {
   auto& state = getAppState();
+  if ((state.alertOverheat || state.alertFanHigh) && !state.alertAcknowledged) {
+    drawAlertScreen();
+    return;
+  }
+
   if (state.currentPage == DisplayPage::Profile) {
     drawProfilePage();
     return;
