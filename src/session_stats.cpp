@@ -189,4 +189,22 @@ int16_t trendTemp(uint8_t sensor, uint16_t index) {
   return trendValue(sensor == 0 ? 1 : 2, index);
 }
 
+int8_t trendDirection(uint8_t series, float current) {
+  if (series > 2 || isnan(current) || trendLength <= TREND_LOOKBACK_POINTS) {
+    return 0;
+  }
+
+  const int16_t reference = trendValue(series, trendLength - 1 - TREND_LOOKBACK_POINTS);
+  if (reference == kInvalid) {
+    return 0;
+  }
+
+  const float delta = current - reference / 10.0f;
+  const float limit = series == 0 ? TREND_DUTY_DELTA : TREND_TEMP_DELTA;
+  if (delta >= limit) {
+    return 1;
+  }
+  return delta <= -limit ? -1 : 0;
+}
+
 }  // namespace session_stats

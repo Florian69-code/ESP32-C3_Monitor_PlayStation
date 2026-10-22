@@ -75,12 +75,16 @@ Alertes (`updateAlerts()`): surchauffe quand une sonde activee atteint son seuil
 
 `src/display_ui.*` ne contient que le rendu OLED et les ecrans d'erreur. Les pages `DisplayPage` sont:
 
-1. `SimplePwm`: duty-cycle en pourcentage;
-2. `StatusFace`: etat sous forme de texte ou d'icone;
-3. `Graph`: historique PWM et maximum;
-4. `Details`: PWM, frequence, seuils et Wi-Fi;
-5. `Temperature`: valeurs des sondes, ou `N/A`; page sautee tant qu'aucune sonde n'est configuree ou detectee;
-6. `Profile`: profil console actif.
+1. `SimplePwm`: duty-cycle en pourcentage, avec fleche de tendance (hausse/baisse/stable sur ~30 s);
+2. `Summary`: PWM et temperatures des seules sondes connectees, en temps reel, avec fleches de tendance (affichee meme sans PWM ni Wi-Fi);
+3. `StatusFace`: etat sous forme de texte ou d'icone;
+4. `Graph`: historique PWM et maximum;
+5. `Details`: PWM, frequence, seuils et Wi-Fi;
+6. `Temperature`: valeurs des sondes, ou `N/A`; page sautee tant qu'aucune sonde n'est configuree ou detectee;
+7. `Session`: duree de la session de jeu en cours, temperature actuelle/max des sondes connectees (ou PWM moyen/max sans sonde), ou duree de la derniere session;
+8. `Profile`: profil console actif.
+
+La fleche de tendance (`session_stats::trendDirection()`) compare la valeur courante a celle d'il y a `TREND_LOOKBACK_POINTS` points (30 s); les seuils sont `TREND_DUTY_DELTA` et `TREND_TEMP_DELTA`. L'ordre des pages a change: la page memorisee en NVS (`page`) peut designer une autre page au premier demarrage apres mise a jour.
 
 Un appui court passe a la page suivante (ou acquitte une alerte en cours). Un appui long d'au moins 800 ms revient a `SimplePwm`. L'ecran de demarrage dure au maximum 5 secondes et peut etre interrompu.
 
@@ -168,7 +172,7 @@ Validation des formulaires Profil: adresse de sonde vide ou de 16 caracteres hex
 | GET | `/live` | Page Live: tendance PWM/sondes (5 a 60 min), statistiques et resume de session de jeu |
 | GET | `/api/live?range=300\|900\|1800\|3600` | Tendance (1 point / 5 s), min/max/moyenne et sessions de jeu en JSON |
 | GET | `/api/history` | PWM courant, maximum, frequence, historique et etat des sondes configurees (nom, detection, temperature) en JSON |
-| GET | `/api/status` | Etat live en JSON: uptime, profil, PWM, frequence, sondes et alertes (surchauffe, ventilateur au maximum) |
+| GET | `/api/status` | Etat live en JSON: uptime, profil, PWM, frequence, sondes, alertes (surchauffe, ventilateur au maximum) et memoire (tas, flash programme, LittleFS: utilise/total/%) |
 | GET | `/api/temperature/scan` | Nouvelle detection; JSON des sondes du bus (adresse, temperature) |
 | GET | `/api/temperature/status` | Etat des deux sondes configurees en JSON (utilise par le graphique) |
 | GET | `/profile` | Profils, seuils et sondes |

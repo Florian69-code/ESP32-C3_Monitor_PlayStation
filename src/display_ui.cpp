@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "config/log_config.h"
+#include "session_stats.h"
 #include "utils/logger.h"
 
 namespace {
@@ -126,6 +127,36 @@ void drawGraph() {
 
 const char* getActiveProfileName() {
   return getConsoleProfileName(getAppState().activeProfile);
+}
+
+// Une sonde est "connectee" si elle repond avec une temperature valide.
+bool isSensorConnected(uint8_t index) {
+  const auto& sensor = getAppState().sensorConfig[index];
+  return sensor.detected && !isnan(sensor.currentTemperature);
+}
+
+// Petite fleche 7x7 px: direction > 0 montante, < 0 descendante, 0 stable.
+void drawTrendArrow(const uint8_t x, const uint8_t y, const int8_t direction) {
+  if (direction > 0) {
+    display.drawTriangle(x + 3, y, x, y + 6, x + 6, y + 6);
+  } else if (direction < 0) {
+    display.drawTriangle(x, y, x + 6, y, x + 3, y + 6);
+  } else {
+    display.drawHLine(x, y + 3, 5);
+    display.drawTriangle(x + 4, y + 1, x + 4, y + 5, x + 6, y + 3);
+  }
+}
+
+// Formate une duree en mm:ss, ou h:mm:ss au-dela d'une heure.
+void formatDuration(const uint32_t seconds, char* buffer, const size_t size) {
+  const unsigned long h = seconds / 3600UL;
+  const unsigned long m = (seconds % 3600UL) / 60UL;
+  const unsigned long s = seconds % 60UL;
+  if (h > 0) {
+    snprintf(buffer, size, "%lu:%02lu:%02lu", h, m, s);
+  } else {
+    snprintf(buffer, size, "%02lu:%02lu", m, s);
+  }
 }
 
 }  // namespace
@@ -264,10 +295,120 @@ void drawSimplePwm() {
   char text[8];
   snprintf(text, sizeof(text), "%.0f%%", state.dutyFiltered);
   display.setFont(u8g2_font_logisoso24_tf);
-  if (display.getStrWidth(text) > SCREEN_WIDTH) {
+  // Reserve 10 px a droite pour la fleche de tendance.
+  constexpr uint8_t kTextAreaWidth = SCREEN_WIDTH - 10;
+  if (display.getStrWidth(text) > kTextAreaWidth) {
     display.setFont(u8g2_font_logisoso18_tf);
   }
-  drawCenteredText(text, 36);
+  const int16_t textWidth = display.getStrWidth(text);
+  display.drawStr(textWidth >= kTextAreaWidth ? 0 : (kTextAreaWidth - textWidth) / 2, 36, text);
+  drawTrendArrow(SCREEN_WIDTH - 8, 22, session_stats::trendDirection(0, state.dutyFiltered));
+
+  display.sendBuffer();
+}
+
+// Vue synthese: PWM et temperatures des sondes connectees, en temps reel.
+void drawSummaryPage() {
+  auto& state = getAppState();
+  display.clearBuffer();
+
+  uint8_t connected[2];
+  uint8_t connectedCount = 0;
+  for (uint8_t i = 0; i < 2; ++i) {
+    if (isSensorConnected(i)) {
+      connected[connectedCount++] = i;
+    }
+  }
+
+  char text[16];
+  if (state.pwmDetected) {
+    snprintf(text, sizeof(text), "PWM %.0f%%", state.dutyFiltered);
+  } else {
+    snprintf(text, sizeof(text), "PWM --");
+  }
+
+  if (connectedCount == 0) {
+    display.setFont(u8g2_font_logisoso18_tf);
+    drawCenteredText(state.pwmDetected ? text + 4 : "--", 30);
+    display.setFont(u8g2_font_5x7_tf);
+    drawCenteredText("PWM", 7);
+    if (state.pwmDetected) {
+      drawTrendArrow(SCREEN_WIDTH - 8, 18, session_stats::trendDirection(0, state.dutyFiltered));
+    }
+    display.sendBuffer();
+    return;
+  }
+
+  display.setFont(u8g2_font_7x13B_tf);
+  display.drawStr(0, 11, text);
+  if (state.pwmDetected) {
+    drawTrendArrow(SCREEN_WIDTH - 8, 4, session_stats::trendDirection(0, state.dutyFiltered));
+  }
+
+  display.setFont(u8g2_font_6x10_tf);
+  const uint8_t firstRowY = connectedCount == 1 ? 28 : 24;
+  for (uint8_t row = 0; row < connectedCount; ++row) {
+    const uint8_t index = connected[row];
+    const float temperature = state.sensorConfig[index].currentTemperature;
+    const uint8_t y = firstRowY + row * 13;
+    snprintf(text, sizeof(text), "S%u %.1fC", static_cast<unsigned>(index + 1), temperature);
+    display.drawStr(0, y, text);
+    drawTrendArrow(SCREEN_WIDTH - 8, y - 7, session_stats::trendDirection(index + 1, temperature));
+  }
+
+  display.sendBuffer();
+}
+
+// Vue session de jeu: duree, temperature actuelle et max par sonde connectee.
+void drawSessionPage() {
+  display.clearBuffer();
+  display.setFont(u8g2_font_5x7_tf);
+  drawCenteredText("SESSION", 7);
+
+  char text[20];
+  const session_stats::Summary current = session_stats::currentSession();
+  if (!current.valid) {
+    display.setFont(u8g2_font_6x10_tf);
+    drawCenteredText("AUCUNE", 22);
+
+    const session_stats::Summary last = session_stats::lastSession();
+    if (last.valid) {
+      char duration[12];
+      formatDuration(last.durationS, duration, sizeof(duration));
+      snprintf(text, sizeof(text), "Der. %s", duration);
+      display.setFont(u8g2_font_5x7_tf);
+      drawCenteredText(text, 36);
+    }
+    display.sendBuffer();
+    return;
+  }
+
+  formatDuration(current.durationS, text, sizeof(text));
+  display.setFont(u8g2_font_7x13B_tf);
+  drawCenteredText(text, 21);
+
+  display.setFont(u8g2_font_5x7_tf);
+  uint8_t y = 31;
+  bool anySensor = false;
+  for (uint8_t i = 0; i < 2; ++i) {
+    if (!isSensorConnected(i)) {
+      continue;
+    }
+    anySensor = true;
+    const float now = getAppState().sensorConfig[i].currentTemperature;
+    if (isnan(current.maxTemp[i])) {
+      snprintf(text, sizeof(text), "S%u %.1f/--", static_cast<unsigned>(i + 1), now);
+    } else {
+      snprintf(text, sizeof(text), "S%u %.1f/%.1f", static_cast<unsigned>(i + 1), now, current.maxTemp[i]);
+    }
+    display.drawStr(0, y, text);
+    y += 9;
+  }
+
+  if (!anySensor) {
+    snprintf(text, sizeof(text), "moy %.0f max %.0f%%", current.avgDuty, current.maxDuty);
+    drawCenteredText(text, 33);
+  }
 
   display.sendBuffer();
 }
@@ -437,6 +578,17 @@ void drawCurrentPage() {
     return;
   }
 
+  // Ces pages restent utiles sans PWM (console eteinte) ou sans Wi-Fi.
+  if (state.currentPage == DisplayPage::Summary) {
+    drawSummaryPage();
+    return;
+  }
+
+  if (state.currentPage == DisplayPage::Session) {
+    drawSessionPage();
+    return;
+  }
+
   if (!state.wifiConnected) {
     drawWifiErrorScreen();
     return;
@@ -461,6 +613,8 @@ void drawCurrentPage() {
       drawDetails();
       break;
     case DisplayPage::Profile:
+    case DisplayPage::Summary:
+    case DisplayPage::Session:
       break;
     case DisplayPage::Count:
       break;

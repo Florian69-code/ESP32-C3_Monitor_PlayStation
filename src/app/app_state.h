@@ -8,10 +8,12 @@
 // plus dépendre de variables globales dispersées dans le sketch.
 enum class DisplayPage : uint8_t {
   SimplePwm = 0,
+  Summary,
   StatusFace,
   Graph,
   Details,
   Temperature,
+  Session,
   Profile,
   Count
 };

@@ -30,6 +30,9 @@ constexpr uint32_t LIVE_SAMPLE_S = 5; // Pas d'echantillonnage de la tendance Li
 constexpr uint16_t LIVE_POINTS = 720; // Points conserves (720 x 5 s = 60 min).
 constexpr uint32_t SESSION_START_MS = 10000; // Duree au-dessus de IDLE COOL avant de demarrer une session.
 constexpr uint32_t SESSION_END_MS = 30000; // Duree sous IDLE COOL avant de terminer la session.
+constexpr uint16_t TREND_LOOKBACK_POINTS = 6; // Comparaison de la fleche de tendance avec N points plus tot (6 x 5 s = 30 s).
+constexpr float TREND_DUTY_DELTA = 2.0f; // Variation PWM (points de %) pour afficher une fleche.
+constexpr float TREND_TEMP_DELTA = 1.0f; // Variation de temperature (°C) pour afficher une fleche.
 
 // === Graphe d'historique ===
 constexpr uint8_t GRAPH_POINTS = 72; // Taille totale du buffer d'historique.

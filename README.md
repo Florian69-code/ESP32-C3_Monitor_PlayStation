@@ -54,12 +54,14 @@ Ces valeurs sont definies dans `src/config/web_config.h` et `src/config/profiles
 
 Pages disponibles (`DisplayPage`) :
 
-1. `SimplePwm`: PWM en % (grand affichage)
-2. `StatusFace`: etat IDLE / MID / GAME avec mode texte ou smiley
-3. `Graph`: historique PWM + max
-4. `Details`: PWM courant, max, frequence
-5. `Temperature`: sondes DS18B20 (page sautee sans sonde)
-6. `Profile`: profil actif (PS5 FAT / PS5 SLIM / PS4 PRO / PS4 FAT / PS3 FAT / PS3 SLIM)
+1. `SimplePwm`: PWM en % (grand affichage) + fleche de tendance
+2. `Summary`: PWM et temperatures des sondes connectees, en temps reel
+3. `StatusFace`: etat IDLE / MID / GAME avec mode texte ou smiley
+4. `Graph`: historique PWM + max
+5. `Details`: PWM courant, max, frequence
+6. `Temperature`: sondes DS18B20 (page sautee sans sonde)
+7. `Session`: duree de jeu, temperature actuelle et max des sondes
+8. `Profile`: profil actif (PS5 FAT / PS5 SLIM / PS4 PRO / PS4 FAT / PS3 FAT / PS3 SLIM)
 
 Alertes: un ecran clignotant SURCHAUFFE ou FAN MAX remplace la page courante; un appui court l'acquitte.
 

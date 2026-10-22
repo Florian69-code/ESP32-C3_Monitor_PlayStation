@@ -37,12 +37,21 @@
         <p>Sonde 1 : <strong id="liveT0">--</strong> | Sonde 2 : <strong id="liveT1">--</strong></p>
         <p>Uptime : <span id="liveUptime">--</span></p>
       </div>
+      <div class="section">
+        <h3>Memoire ESP32-C3</h3>
+        <p>RAM (tas) : <strong id="memHeap">--</strong></p>
+        <p>Flash programme : <strong id="memFlash">--</strong></p>
+        <p>Fichiers (LittleFS) : <strong id="memFs">--</strong></p>
+        <p class="inline-help" id="memExtra">--</p>
+      </div>
     </main>
   </div>
   <script>
     (function () {
       const $ = (id) => document.getElementById(id);
       const fmt = (v, unit) => (v === null || v === undefined) ? '--' : v.toFixed(1) + unit;
+      const fmtBytes = (b) => b >= 1048576 ? (b / 1048576).toFixed(2) + ' Mo' : (b / 1024).toFixed(1) + ' Ko';
+      const fmtMem = (m) => m && m.total > 0 ? fmtBytes(m.used) + ' / ' + fmtBytes(m.total) + ' (' + m.pct.toFixed(1) + ' %)' : '--';
       async function refresh() {
         try {
           const r = await fetch('/api/status', { cache: 'no-store' });
@@ -57,6 +66,11 @@
           });
           const m = Math.floor(s.uptime_s / 60);
           $('liveUptime').textContent = Math.floor(m / 60) + 'h ' + (m % 60) + 'min';
+          $('memHeap').textContent = fmtMem(s.memory.heap);
+          $('memFlash').textContent = fmtMem(s.memory.flash);
+          $('memFs').textContent = fmtMem(s.memory.fs);
+          $('memExtra').textContent = 'RAM libre minimale depuis le demarrage : ' + fmtBytes(s.memory.heap_min_free) +
+            ' | plus grand bloc libre : ' + fmtBytes(s.memory.heap_max_block);
           const msgs = [];
           if (s.alerts.overheat) msgs.push('SURCHAUFFE sonde ' + (s.alerts.sensor + 1) + ' : ' + fmt(s.alerts.temperature, ' \u00b0C'));
           if (s.alerts.fan_high) msgs.push('Ventilateur au maximum depuis trop longtemps');

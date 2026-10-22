@@ -31,4 +31,8 @@ uint16_t trendCount();
 int16_t trendDuty(uint16_t index);
 int16_t trendTemp(uint8_t sensor, uint16_t index);
 
+// Direction de tendance par rapport a ~30 s avant: +1 hausse, -1 baisse, 0 stable ou inconnu.
+// series: 0 = PWM, 1 = sonde 1, 2 = sonde 2.
+int8_t trendDirection(uint8_t series, float current);
+
 }  // namespace session_stats

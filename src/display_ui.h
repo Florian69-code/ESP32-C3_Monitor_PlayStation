@@ -32,6 +32,12 @@ void drawNoPwmMessage();
 // Affiche la page PWM simple (pourcentage instantane).
 void drawSimplePwm();
 
+// Affiche PWM et temperatures des sondes connectees en temps reel, avec fleche de tendance.
+void drawSummaryPage();
+
+// Affiche la session de jeu en cours: duree, temperature actuelle et max des sondes connectees.
+void drawSessionPage();
+
 // Affiche la page statut (smiley/texte selon mode icone).
 void drawStatusFace();
 

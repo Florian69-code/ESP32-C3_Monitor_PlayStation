@@ -1,6 +1,7 @@
 #include "web_ui.h"
 
 #include <ESP.h>
+#include <LittleFS.h>
 #include <Preferences.h>
 #include <stdlib.h>
 
@@ -416,13 +417,47 @@ String buildHistoryJsonPayload() {
   return payload;
 }
 
+// Ajoute {"used":..,"total":..,"pct":..} (octets) au JSON.
+void appendMemoryEntry(String& out, const char* name, uint32_t used, uint32_t total) {
+  out += "\"";
+  out += name;
+  out += "\":{\"used\":";
+  out += String(static_cast<unsigned long>(used));
+  out += ",\"total\":";
+  out += String(static_cast<unsigned long>(total));
+  out += ",\"pct\":";
+  out += String(total > 0 ? (100.0f * used / total) : 0.0f, 1);
+  out += "}";
+}
+
+// Etat memoire: RAM (tas), flash programme et partition LittleFS.
+String buildMemoryJson() {
+  const uint32_t heapTotal = ESP.getHeapSize();
+  const uint32_t heapFree = ESP.getFreeHeap();
+  const uint32_t sketchUsed = ESP.getSketchSize();
+  const uint32_t sketchTotal = sketchUsed + ESP.getFreeSketchSpace();
+
+  String json = "{";
+  appendMemoryEntry(json, "heap", heapTotal - heapFree, heapTotal);
+  json += ",\"heap_min_free\":";
+  json += String(static_cast<unsigned long>(ESP.getMinFreeHeap()));
+  json += ",\"heap_max_block\":";
+  json += String(static_cast<unsigned long>(ESP.getMaxAllocHeap()));
+  json += ",";
+  appendMemoryEntry(json, "flash", sketchUsed, sketchTotal);
+  json += ",";
+  appendMemoryEntry(json, "fs", LittleFS.usedBytes(), LittleFS.totalBytes());
+  json += "}";
+  return json;
+}
+
 // Construit la reponse JSON de l'endpoint /api/status (etat live complet).
 String buildStatusJsonPayload() {
   auto& state = getAppState();
   const char* profileName = getConsoleProfileName(state.activeProfile);
 
   String payload;
-  payload.reserve(640);
+  payload.reserve(1024);
   payload += "{\"uptime_s\":";
   payload += String(static_cast<unsigned long>(millis() / 1000UL));
   payload += ",\"profile\":\"";
@@ -449,7 +484,9 @@ String buildStatusJsonPayload() {
   } else {
     payload += String(state.alertTemperature, 1);
   }
-  payload += "},\"temperatures\":";
+  payload += "},\"memory\":";
+  payload += buildMemoryJson();
+  payload += ",\"temperatures\":";
   payload += buildTemperatureStatusJson();
   payload += "}";
   return payload;
