@@ -10,7 +10,7 @@ Le firmware mesure le signal PWM du ventilateur, calcule le duty-cycle et la fre
 - Filtrage exponentiel du duty-cycle (cycle de vie) et de la frequence.
 - Six pages OLED: PWM, etat, historique, details, temperatures et profil.
     - Historique (graphique) de 72 points, affichage OLED et graphique Web.
-- Profils PS5 FAT, PS4 PRO et PS3 FAT.
+- Profils PS5 FAT, PS5 SLIM, PS4 PRO, PS4 FAT, PS3 FAT et PS3 SLIM.
 - LED thermique sur GPIO 8.
 - Jusqu'a deux sondes DS18B20 sur GPIO 4.
 - Detection, nommage et seuils individuels des sondes par profil.

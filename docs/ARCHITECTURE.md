@@ -11,7 +11,7 @@ Les profils console disponibles sont:
 
 - PS5 FAT, profil par defaut;
 - PS4 PRO;
-- PS3 FAT.
+- PS3 FAT;
 - PS5 SLIM, PS4 FAT, PS3 SLIM (valeurs de depart copiees des modeles proches, a calibrer).
 
 ## Materiel et broches
@@ -37,7 +37,7 @@ Le signal applique a GPIO 2 doit respecter les niveaux electriques de l'ESP32-C3
   README.md
   data/
     assets/style.css
-    pages/{console,history,home,login,profile,redirect}.html
+    pages/{console,history,home,live,login,profile,redirect}.html
   docs/
     ARCHITECTURE.md
     3d/
@@ -63,9 +63,13 @@ Le signal applique a GPIO 2 doit respecter les niveaux electriques de l'ESP32-C3
 
 ### Application et etat
 
-`src/app/app_state.*` contient l'etat partage par la logique, l'OLED et le Web: page courante, profil, mesures PWM filtrees, maximum, historique, statuts Wi-Fi/PWM, seuils des trois profils, configuration des deux sondes et parametres du logger Web.
+`src/app/app_state.*` contient l'etat partage par la logique, l'OLED et le Web: page courante, profil, mesures PWM filtrees, maximum, historique, statuts Wi-Fi/PWM, alertes, seuils des six profils, configuration des deux sondes et parametres du logger Web.
 
-`src/app/app_logic.*` orchestre le cycle de vie, le bouton, la persistance Preferences, l'acquisition PWM, le rafraichissement temperature, la LED et le serveur Web.
+`src/session_stats.*` conserve en RAM une tendance de 60 minutes (PWM et deux sondes, un point toutes les 5 s, `LIVE_*` dans `defaults.h`) et detecte les sessions de jeu (demarrage apres 10 s au-dessus de IDLE COOL, fin apres 30 s en dessous, `SESSION_*`). Le resume (duree, PWM moyen/max, temps en GAME HOT, temperature max par sonde) alimente `/api/live`. Ces donnees sont perdues au redemarrage.
+
+`src/app/app_logic.*` orchestre le cycle de vie, le bouton, la persistance Preferences, l'acquisition PWM, le rafraichissement temperature, les alertes, la LED et le serveur Web.
+
+Alertes (`updateAlerts()`): surchauffe quand une sonde activee atteint son seuil MAX (hysteresis de 2 degres) et ventilateur au maximum quand le PWM reste au-dessus de GAME HOT + 10 points pendant 60 s (`ALERT_*`). L'OLED affiche un ecran clignotant; un appui court l'acquitte jusqu'a la fin de l'alerte. Les alertes sont aussi exposees par `/api/status`.
 
 ### Ecran OLED
 
@@ -75,10 +79,10 @@ Le signal applique a GPIO 2 doit respecter les niveaux electriques de l'ESP32-C3
 2. `StatusFace`: etat sous forme de texte ou d'icone;
 3. `Graph`: historique PWM et maximum;
 4. `Details`: PWM, frequence, seuils et Wi-Fi;
-5. `Temperature`: valeurs des sondes, ou `N/A`;
+5. `Temperature`: valeurs des sondes, ou `N/A`; page sautee tant qu'aucune sonde n'est configuree ou detectee;
 6. `Profile`: profil console actif.
 
-Un appui court passe a la page suivante. Un appui long d'au moins 800 ms revient a `SimplePwm`. L'ecran de demarrage dure au maximum 5 secondes et peut etre interrompu.
+Un appui court passe a la page suivante (ou acquitte une alerte en cours). Un appui long d'au moins 800 ms revient a `SimplePwm`. L'ecran de demarrage dure au maximum 5 secondes et peut etre interrompu.
 
 ### Acquisition PWM
 
@@ -183,11 +187,11 @@ Toutes les routes fonctionnelles sauf la connexion exigent le cookie d'authentif
 
 Namespace Preferences: `ps5fan`.
 
-Les cles principales sont `page`, `console_profile`, `icon_mode`, `thr_offset`, `log_level`, `log_refresh`, les seuils PWM `p5_*`, `p4_*`, `p3_*` (`_i_cool`, `_i_hot`, `_g_cool`), les seuils temperature du profil `<profil>_t_idle` et `<profil>_t_max`, ainsi que les reglages de sondes `<profil>_s1_*` et `<profil>_s2_*` (`addr`, `name`, `t_idle`, `t_max`).
+Les cles principales sont `page`, `console_profile`, `icon_mode`, `thr_offset`, `log_level`, `log_refresh`, les seuils PWM `p5_*`, `p4_*`, `p3_*`, `p5s_*`, `p4f_*`, `p3s_*` (`_i_cool`, `_i_hot` = GAME COOL max, `_g_cool` = GAME HOT max; noms historiques conserves), les seuils temperature du profil `<profil>_t_idle` et `<profil>_t_max`, ainsi que les reglages de sondes `<profil>_s1_*` et `<profil>_s2_*` (`addr`, `name`, `t_idle`, `t_max`).
 
 Les cles ESP32 sont limitees a 15 caracteres: l'offset utilise `thr_offset`, et non l'ancien nom `threshold_offset`; les anciennes cles `temperature_idle` (16 caracteres) et `temperature_max` ne sont plus utilisees. Une chaine vide ecrite avec `putString` retourne 0: ce n'est pas une erreur.
 
-La remise a zero reecrit les seuils PWM par defaut des trois profils, supprime les reglages de sondes et de seuils temperature, remet l'etat runtime a zero et redemarre l'ESP32-C3.
+La remise a zero reecrit les seuils PWM par defaut des six profils, supprime les reglages de sondes et de seuils temperature, remet l'etat runtime a zero et redemarre l'ESP32-C3.
 
 ## Configuration et build
 
