@@ -12,6 +12,7 @@ Les profils console disponibles sont:
 - PS5 FAT, profil par defaut;
 - PS4 PRO;
 - PS3 FAT.
+- PS5 SLIM, PS4 FAT, PS3 SLIM (valeurs de depart copiees des modeles proches, a calibrer).
 
 ## Materiel et broches
 
@@ -49,6 +50,7 @@ Le signal applique a GPIO 2 doit respecter les niveaux electriques de l'ESP32-C3
     display_ui.{h,cpp}
     pwm_sampler.{h,cpp}
     temperature_manager.{h,cpp}
+    session_stats.{h,cpp}
     app/{app_state,app_logic}.{h,cpp}
     config/{pins,profiles,defaults,log_config,web_config}.h
     network/{wifi_manager,web_ui,web_pages,web_storage}.{h,cpp}
@@ -159,6 +161,8 @@ Validation des formulaires Profil: adresse de sonde vide ou de 16 caracteres hex
 | GET | `/` | Login si non authentifie, accueil sinon |
 | GET/POST | `/login` | Formulaire et verification du mot de passe |
 | GET | `/history` | Graphiques (historique PWM et sondes) |
+| GET | `/live` | Page Live: tendance PWM/sondes (5 a 60 min), statistiques et resume de session de jeu |
+| GET | `/api/live?range=300\|900\|1800\|3600` | Tendance (1 point / 5 s), min/max/moyenne et sessions de jeu en JSON |
 | GET | `/api/history` | PWM courant, maximum, frequence, historique et etat des sondes configurees (nom, detection, temperature) en JSON |
 | GET | `/api/status` | Etat live en JSON: uptime, profil, PWM, frequence, sondes et alertes (surchauffe, ventilateur au maximum) |
 | GET | `/api/temperature/scan` | Nouvelle detection; JSON des sondes du bus (adresse, temperature) |

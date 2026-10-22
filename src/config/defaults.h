@@ -25,6 +25,12 @@ constexpr uint32_t ALERT_FAN_HIGH_MS = 60000; // Duree continue au-dessus de la 
 constexpr float ALERT_TEMP_HYSTERESIS = 2.0f; // Hysteresis (°C) pour lever l'alerte temperature.
 constexpr uint32_t ALERT_BLINK_MS = 500; // Periode de clignotement de l'ecran d'alerte.
 
+// === Statistiques (tendance Live et sessions de jeu) ===
+constexpr uint32_t LIVE_SAMPLE_S = 5; // Pas d'echantillonnage de la tendance Live (secondes).
+constexpr uint16_t LIVE_POINTS = 720; // Points conserves (720 x 5 s = 60 min).
+constexpr uint32_t SESSION_START_MS = 10000; // Duree au-dessus de IDLE COOL avant de demarrer une session.
+constexpr uint32_t SESSION_END_MS = 30000; // Duree sous IDLE COOL avant de terminer la session.
+
 // === Graphe d'historique ===
 constexpr uint8_t GRAPH_POINTS = 72; // Taille totale du buffer d'historique.
 constexpr uint8_t GRAPH_VISIBLE_POINTS = 30; // Nombre de points affiches a l'ecran.

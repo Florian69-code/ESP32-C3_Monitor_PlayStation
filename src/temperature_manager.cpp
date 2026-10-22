@@ -72,7 +72,7 @@ bool parseAddress(const String& hex, DeviceAddress& out) {
 }
 
 const char* profilePrefix(ConsoleProfile profile) {
-  return profile == ConsoleProfile::PS4_PRO ? "p4" : (profile == ConsoleProfile::PS3_FAT ? "p3" : "p5");
+  return getConsoleProfileStoragePrefix(profile);
 }
 
 // Cles NVS limitees a 15 caracteres : "<prefixe>_<suffixe>".

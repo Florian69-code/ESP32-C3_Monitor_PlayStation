@@ -27,6 +27,9 @@ String getHomePage(const AppState& state);
 // Retourne la page historique (graphe + script fetch API).
 String getHistoryPage();
 
+// Retourne la page Live minimale quand live.html est absent de LittleFS.
+String getLivePageFallback();
+
 // Retourne la page profil avec seuils, mode icone et message d'etat optionnel.
 String getProfilePage(const AppState& state, const String& statusMessage = String());
 

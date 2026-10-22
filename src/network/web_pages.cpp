@@ -47,15 +47,7 @@ String buildProfileThresholdsJson(const AppState& state) {
 }
 
 const char* getProfileName(ConsoleProfile profile) {
-  switch (profile) {
-    case ConsoleProfile::PS4_PRO:
-      return "PS4 PRO";
-    case ConsoleProfile::PS3_FAT:
-      return "PS3 FAT";
-    case ConsoleProfile::PS5_FAT:
-    default:
-      return "PS5 FAT";
-  }
+  return getConsoleProfileName(profile);
 }
 
 const char* getCurrentLogLevelName(const uint8_t levelValue) {
@@ -84,6 +76,7 @@ String getNavHtml(const char* activeHome,
   nav += "<nav>";
   nav += String("<a class=\"") + activeHome + "\" href=\"/\">Accueil</a>";
   nav += String("<a class=\"") + activeHistory + "\" href=\"/history\">Graphiques</a>";
+  nav += "<a href=\"/live\">Live</a>";
   nav += String("<a class=\"") + activeProfile + "\" href=\"/profile\">Profil</a>";
   nav += String("<a class=\"") + activeConsole + "\" href=\"/console\">Console</a>";
   nav += "</nav>";
@@ -304,10 +297,11 @@ String buildFallbackProfileHtml(const AppState& state, const String& statusMessa
            "\"" + (selected ? " selected" : "") + ">" + label + "</option>";
   };
 
-  const String profileOptions =
-      buildProfileOption(ConsoleProfile::PS3_FAT, "PS3 FAT") +
-      buildProfileOption(ConsoleProfile::PS4_PRO, "PS4 PRO") +
-      buildProfileOption(ConsoleProfile::PS5_FAT, "PS5 FAT");
+  String profileOptions;
+  for (uint8_t i = 0; i < CONSOLE_PROFILE_COUNT; ++i) {
+    const ConsoleProfile profile = static_cast<ConsoleProfile>(i);
+    profileOptions += buildProfileOption(profile, getConsoleProfileName(profile));
+  }
 
   const uint8_t normalizedMode = state.iconMode == 0 ? 0 : 1;
   const String modeOptions =
@@ -582,6 +576,12 @@ String web_pages::getHomePage(const AppState& state) {
   return buildFallbackHomeHtml(state);
 }
 
+String web_pages::getLivePageFallback() {
+  return wrapFallbackPage("Live",
+                          "<main><h2>Live</h2><p>Page indisponible: televersez le systeme de fichiers (pio run -t uploadfs).</p></main>",
+                          true, "", "", "", "");
+}
+
 String web_pages::getHistoryPage() {
   web_storage::TemplateToken navTokens[4];
   fillNavTokens(navTokens, "", "active", "", "");
@@ -603,10 +603,11 @@ String web_pages::getHistoryPage() {
 }
 
 String web_pages::getProfilePage(const AppState& state, const String& statusMessage) {
-  const String profileOptions =
-      profileToOption(ConsoleProfile::PS3_FAT, state.activeProfile, "PS3 FAT") +
-      profileToOption(ConsoleProfile::PS4_PRO, state.activeProfile, "PS4 PRO") +
-      profileToOption(ConsoleProfile::PS5_FAT, state.activeProfile, "PS5 FAT");
+  String profileOptions;
+  for (uint8_t i = 0; i < CONSOLE_PROFILE_COUNT; ++i) {
+    const ConsoleProfile profile = static_cast<ConsoleProfile>(i);
+    profileOptions += profileToOption(profile, state.activeProfile, getConsoleProfileName(profile));
+  }
 
   const uint8_t normalizedMode = state.iconMode == 0 ? 0 : 1;
   const uint8_t profileIndex = static_cast<uint8_t>(state.activeProfile);

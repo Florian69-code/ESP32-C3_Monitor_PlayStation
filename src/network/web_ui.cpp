@@ -9,6 +9,7 @@
 #include "../config/log_config.h"
 #include "../config/profiles.h"
 #include "../config/web_config.h"
+#include "../session_stats.h"
 #include "web_pages.h"
 #include "web_storage.h"
 #include "../temperature_manager.h"
@@ -83,19 +84,7 @@ bool parseUInt8Arg(const String& rawValue, uint8_t& parsedValue) {
 
 // Valide/convertit une valeur brute en profil console supporte.
 bool parseConsoleProfile(const uint8_t profileValue, ConsoleProfile& profile) {
-  switch (profileValue) {
-    case static_cast<uint8_t>(ConsoleProfile::PS3_FAT):
-      profile = ConsoleProfile::PS3_FAT;
-      return true;
-    case static_cast<uint8_t>(ConsoleProfile::PS4_PRO):
-      profile = ConsoleProfile::PS4_PRO;
-      return true;
-    case static_cast<uint8_t>(ConsoleProfile::PS5_FAT):
-      profile = ConsoleProfile::PS5_FAT;
-      return true;
-    default:
-      return false;
-  }
+  return parseConsoleProfileValue(profileValue, profile);
 }
 
 // Nom de sonde affiche en HTML/JSON : caracteres restreints pour eviter toute injection.
@@ -116,15 +105,7 @@ bool isValidSensorName(const String& name) {
 
 // Prefixe de stockage NVS des seuils associes au profil.
 const char* getProfileStoragePrefix(ConsoleProfile profile) {
-  switch (profile) {
-    case ConsoleProfile::PS4_PRO:
-      return "p4";
-    case ConsoleProfile::PS3_FAT:
-      return "p3";
-    case ConsoleProfile::PS5_FAT:
-    default:
-      return "p5";
-  }
+  return getConsoleProfileStoragePrefix(profile);
 }
 
 // Applique la configuration profil recue en POST.
@@ -386,26 +367,14 @@ bool resetProfileSettings() {
   state.signalLost = false;
   state.dutyMax = 0.0f;
 
-  const uint8_t p5 = static_cast<uint8_t>(ConsoleProfile::PS5_FAT);
-  state.profileThresholds[p5].idleCoolMax = STATUS_PS5F_IDLE_COOL_MAX;
-  state.profileThresholds[p5].gameCoolMax = STATUS_PS5F_GAME_COOL_MAX;
-  state.profileThresholds[p5].gameHotMax = STATUS_PS5F_GAME_HOT_MAX;
-  state.profileThresholds[p5].temperatureIdle = STATUS_PS5F_TEMPERATURE_IDLE;
-  state.profileThresholds[p5].temperatureMax = STATUS_PS5F_TEMPERATURE_MAX;
-
-  const uint8_t p4 = static_cast<uint8_t>(ConsoleProfile::PS4_PRO);
-  state.profileThresholds[p4].idleCoolMax = STATUS_PS4P_IDLE_COOL_MAX;
-  state.profileThresholds[p4].gameCoolMax = STATUS_PS4P_GAME_COOL_MAX;
-  state.profileThresholds[p4].gameHotMax = STATUS_PS4P_GAME_HOT_MAX;
-  state.profileThresholds[p4].temperatureIdle = STATUS_PS4P_TEMPERATURE_IDLE;
-  state.profileThresholds[p4].temperatureMax = STATUS_PS4P_TEMPERATURE_MAX;
-
-  const uint8_t p3 = static_cast<uint8_t>(ConsoleProfile::PS3_FAT);
-  state.profileThresholds[p3].idleCoolMax = STATUS_PS3F_IDLE_COOL_MAX;
-  state.profileThresholds[p3].gameCoolMax = STATUS_PS3F_GAME_COOL_MAX;
-  state.profileThresholds[p3].gameHotMax = STATUS_PS3F_GAME_HOT_MAX;
-  state.profileThresholds[p3].temperatureIdle = STATUS_PS3F_TEMPERATURE_IDLE;
-  state.profileThresholds[p3].temperatureMax = STATUS_PS3F_TEMPERATURE_MAX;
+  for (uint8_t i = 0; i < CONSOLE_PROFILE_COUNT; ++i) {
+    const ProfileThresholdPreset preset = getDefaultProfileThresholdPreset(static_cast<ConsoleProfile>(i));
+    state.profileThresholds[i].idleCoolMax = preset.idleCoolMax;
+    state.profileThresholds[i].gameCoolMax = preset.gameCoolMax;
+    state.profileThresholds[i].gameHotMax = preset.gameHotMax;
+    state.profileThresholds[i].temperatureIdle = preset.temperatureIdle;
+    state.profileThresholds[i].temperatureMax = preset.temperatureMax;
+  }
 
   logger::setLevel(static_cast<logger::LogLevel>(state.webLogLevel));
   resetHistoryBuffer();
@@ -450,12 +419,7 @@ String buildHistoryJsonPayload() {
 // Construit la reponse JSON de l'endpoint /api/status (etat live complet).
 String buildStatusJsonPayload() {
   auto& state = getAppState();
-  const char* profileName = "PS5 FAT";
-  if (state.activeProfile == ConsoleProfile::PS4_PRO) {
-    profileName = "PS4 PRO";
-  } else if (state.activeProfile == ConsoleProfile::PS3_FAT) {
-    profileName = "PS3 FAT";
-  }
+  const char* profileName = getConsoleProfileName(state.activeProfile);
 
   String payload;
   payload.reserve(640);
@@ -489,6 +453,143 @@ String buildStatusJsonPayload() {
   payload += buildTemperatureStatusJson();
   payload += "}";
   return payload;
+}
+
+// Serialise une valeur en dixiemes (kInvalid -> null).
+void appendTenths(String& out, int16_t tenths) {
+  if (tenths == session_stats::kInvalid) {
+    out += "null";
+  } else {
+    out += String(tenths / 10.0f, 1);
+  }
+}
+
+// Envoie un tableau JSON de la serie [first, first+count) par blocs pour limiter la RAM.
+void sendTrendSeries(WebServer& server, const char* name, int8_t sensor, uint16_t first, uint16_t count) {
+  String chunk;
+  chunk.reserve(256);
+  chunk += "\"";
+  chunk += name;
+  chunk += "\":[";
+  for (uint16_t i = 0; i < count; ++i) {
+    if (i > 0) {
+      chunk += ",";
+    }
+    const int16_t value = sensor < 0 ? session_stats::trendDuty(first + i)
+                                     : session_stats::trendTemp(static_cast<uint8_t>(sensor), first + i);
+    appendTenths(chunk, value);
+    if (chunk.length() > 200) {
+      server.sendContent(chunk);
+      chunk = "";
+    }
+  }
+  chunk += "]";
+  server.sendContent(chunk);
+}
+
+// Min/max/moyenne d'une serie sur la fenetre demandee.
+String buildSeriesStatsJson(int8_t sensor, uint16_t first, uint16_t count) {
+  int32_t minV = INT32_MAX;
+  int32_t maxV = INT32_MIN;
+  int64_t sum = 0;
+  uint16_t valid = 0;
+  for (uint16_t i = 0; i < count; ++i) {
+    const int16_t value = sensor < 0 ? session_stats::trendDuty(first + i)
+                                     : session_stats::trendTemp(static_cast<uint8_t>(sensor), first + i);
+    if (value == session_stats::kInvalid) {
+      continue;
+    }
+    minV = min<int32_t>(minV, value);
+    maxV = max<int32_t>(maxV, value);
+    sum += value;
+    ++valid;
+  }
+
+  if (valid == 0) {
+    return String("null");
+  }
+  String json = "{\"min\":";
+  json += String(minV / 10.0f, 1);
+  json += ",\"max\":";
+  json += String(maxV / 10.0f, 1);
+  json += ",\"avg\":";
+  json += String(static_cast<float>(sum) / valid / 10.0f, 1);
+  json += "}";
+  return json;
+}
+
+String buildSessionJson(const session_stats::Summary& summary) {
+  if (!summary.valid) {
+    return String("null");
+  }
+  String json = "{\"active\":";
+  json += summary.active ? "true" : "false";
+  json += ",\"duration_s\":";
+  json += String(static_cast<unsigned long>(summary.durationS));
+  json += ",\"avg_duty\":";
+  json += String(summary.avgDuty, 1);
+  json += ",\"max_duty\":";
+  json += String(summary.maxDuty, 1);
+  json += ",\"hot_s\":";
+  json += String(static_cast<unsigned long>(summary.hotSeconds));
+  for (uint8_t i = 0; i < 2; ++i) {
+    json += ",\"max_t";
+    json += String(i);
+    json += "\":";
+    if (isnan(summary.maxTemp[i])) {
+      json += "null";
+    } else {
+      json += String(summary.maxTemp[i], 1);
+    }
+  }
+  json += "}";
+  return json;
+}
+
+// Reponse /api/live: tendance + statistiques de fenetre + resume de session (envoi par blocs).
+void sendLiveJson(WebServer& server) {
+  uint16_t rangeSeconds = 900;
+  if (server.hasArg("range")) {
+    const long requested = server.arg("range").toInt();
+    if (requested == 300 || requested == 900 || requested == 1800 || requested == 3600) {
+      rangeSeconds = static_cast<uint16_t>(requested);
+    }
+  }
+
+  const uint16_t total = session_stats::trendCount();
+  const uint16_t wanted = rangeSeconds / LIVE_SAMPLE_S;
+  const uint16_t count = total < wanted ? total : wanted;
+  const uint16_t first = total - count;
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "application/json", "");
+
+  String head = "{\"step_s\":";
+  head += String(static_cast<unsigned long>(LIVE_SAMPLE_S));
+  head += ",\"count\":";
+  head += String(count);
+  head += ",";
+  server.sendContent(head);
+  sendTrendSeries(server, "duty", -1, first, count);
+  server.sendContent(",");
+  sendTrendSeries(server, "t0", 0, first, count);
+  server.sendContent(",");
+  sendTrendSeries(server, "t1", 1, first, count);
+
+  String tail = ",\"stats\":{\"duty\":";
+  tail += buildSeriesStatsJson(-1, first, count);
+  tail += ",\"t0\":";
+  tail += buildSeriesStatsJson(0, first, count);
+  tail += ",\"t1\":";
+  tail += buildSeriesStatsJson(1, first, count);
+  tail += "},\"session\":{\"current\":";
+  tail += buildSessionJson(session_stats::currentSession());
+  tail += ",\"last\":";
+  tail += buildSessionJson(session_stats::lastSession());
+  tail += "}}";
+  server.sendContent(tail);
+  server.sendContent("");
 }
 
 // Verifie l'authentification en memoire et/ou par cookie HTTP.
@@ -613,6 +714,30 @@ void web_ui::initializeRoutes(WebServer& server) {
 
     server.sendHeader("Cache-Control", "no-store");
     server.send(200, "application/json", buildStatusJsonPayload());
+  });
+
+  server.on("/api/live", HTTP_GET, [&server]() {
+    if (!isAuthorized(server)) {
+      server.sendHeader("Cache-Control", "no-store");
+      server.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+      return;
+    }
+
+    sendLiveJson(server);
+  });
+
+  server.on("/live", HTTP_GET, [&server]() {
+    if (!isAuthorized(server)) {
+      redirectTo(server, "/login");
+      return;
+    }
+
+    if (web_storage::sendStaticFile(server, "/pages/live.html", "text/html", "no-store")) {
+      return;
+    }
+
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "text/html", web_pages::getLivePageFallback());
   });
 
   server.on("/api/history", HTTP_GET, [&server]() {

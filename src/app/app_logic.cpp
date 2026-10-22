@@ -8,6 +8,7 @@
 #include "../display_ui.h"
 #include "../network/wifi_manager.h"
 #include "../pwm_sampler.h"
+#include "../session_stats.h"
 #include "../temperature_manager.h"
 #include "../utils/logger.h"
 
@@ -34,15 +35,7 @@ uint8_t profileToIndex(ConsoleProfile profile) {
 // Retourne le prefixe de cle NVS associe au profil.
 // Exemples: p5_i_cool, p4_g_cool, p3_i_hot.
 const char* getProfileStoragePrefix(ConsoleProfile profile) {
-  switch (profile) {
-    case ConsoleProfile::PS4_PRO:
-      return "p4";
-    case ConsoleProfile::PS3_FAT:
-      return "p3";
-    case ConsoleProfile::PS5_FAT:
-    default:
-      return "p5";
-  }
+  return getConsoleProfileStoragePrefix(profile);
 }
 
 // Charge les seuils persistants d'un profil, avec fallback sur presets par defaut.
@@ -125,24 +118,17 @@ void loadPersistedSettings() {
   }
 
   const uint8_t savedProfile = preferences.getUChar("console_profile", static_cast<uint8_t>(DEFAULT_CONSOLE_PROFILE));
-  switch (savedProfile) {
-    case static_cast<uint8_t>(ConsoleProfile::PS4_PRO):
-      getAppState().activeProfile = ConsoleProfile::PS4_PRO;
-      break;
-    case static_cast<uint8_t>(ConsoleProfile::PS3_FAT):
-      getAppState().activeProfile = ConsoleProfile::PS3_FAT;
-      break;
-    case static_cast<uint8_t>(ConsoleProfile::PS5_FAT):
-    default:
-      getAppState().activeProfile = ConsoleProfile::PS5_FAT;
-      break;
+  ConsoleProfile savedProfileValue = DEFAULT_CONSOLE_PROFILE;
+  if (!parseConsoleProfileValue(savedProfile, savedProfileValue)) {
+    savedProfileValue = DEFAULT_CONSOLE_PROFILE;
   }
+  getAppState().activeProfile = savedProfileValue;
 
   getAppState().thresholdOffset = preferences.getFloat(kThresholdOffsetKey, 0.0f);
 
-  loadThresholdPresetForProfile(ConsoleProfile::PS5_FAT);
-  loadThresholdPresetForProfile(ConsoleProfile::PS4_PRO);
-  loadThresholdPresetForProfile(ConsoleProfile::PS3_FAT);
+  for (uint8_t i = 0; i < CONSOLE_PROFILE_COUNT; ++i) {
+    loadThresholdPresetForProfile(static_cast<ConsoleProfile>(i));
+  }
   temperature_manager::loadFromPreferences(preferences, getAppState().activeProfile);
 
   const uint8_t storedIconMode = preferences.getUChar("icon_mode", 1);
@@ -257,6 +243,20 @@ void updateAlerts(const uint32_t nowMs) {
   }
 }
 
+// Une page n'est proposee que si ses donnees existent (ex: Temperature sans sonde est masquee).
+bool isPageAvailable(DisplayPage page) {
+  if (page == DisplayPage::Temperature) {
+    const auto& state = getAppState();
+    for (const auto& sensor : state.sensorConfig) {
+      if (sensor.enabled || sensor.detected) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return true;
+}
+
 void handleShortPress() {
   auto& state = getAppState();
 
@@ -265,7 +265,14 @@ void handleShortPress() {
     return;
   }
 
-  const uint8_t nextPage = (static_cast<uint8_t>(state.currentPage) + 1) % static_cast<uint8_t>(DisplayPage::Count);
+  const uint8_t pageCount = static_cast<uint8_t>(DisplayPage::Count);
+  uint8_t nextPage = static_cast<uint8_t>(state.currentPage);
+  for (uint8_t i = 0; i < pageCount; ++i) {
+    nextPage = (nextPage + 1) % pageCount;
+    if (isPageAvailable(static_cast<DisplayPage>(nextPage))) {
+      break;
+    }
+  }
   state.currentPage = static_cast<DisplayPage>(nextPage);
   syncPagePreference();
 }
@@ -395,17 +402,12 @@ bool resetProfilePageSettingsToDefaults() {
   writeOk = writeAndVerifyUChar("icon_mode", 1) && writeOk;
   writeOk = writeAndVerifyFloat(kThresholdOffsetKey, 0.0f) && writeOk;
 
-  const ConsoleProfile profiles[] = {
-      ConsoleProfile::PS5_FAT,
-      ConsoleProfile::PS4_PRO,
-      ConsoleProfile::PS3_FAT,
-  };
-
-  for (const ConsoleProfile profile : profiles) {
-    temperature_manager::clearPersistedSettings(preferences, profile);
+  for (uint8_t profileIdx = 0; profileIdx < CONSOLE_PROFILE_COUNT; ++profileIdx) {
+    temperature_manager::clearPersistedSettings(preferences, static_cast<ConsoleProfile>(profileIdx));
   }
 
-  for (const ConsoleProfile profile : profiles) {
+  for (uint8_t profileIdx = 0; profileIdx < CONSOLE_PROFILE_COUNT; ++profileIdx) {
+    const ConsoleProfile profile = static_cast<ConsoleProfile>(profileIdx);
     const ProfileThresholdPreset defaults = getDefaultProfileThresholdPreset(profile);
     const char* prefix = getProfileStoragePrefix(profile);
 
@@ -465,7 +467,11 @@ void updateApp() {
   }
 
   temperature_manager::update();
+  if (!isPageAvailable(state.currentPage)) {
+    state.currentPage = DisplayPage::SimplePwm;
+  }
   updateAlerts(nowMs);
+  session_stats::update(nowMs);
   updateLedState();
   drawCurrentPage();
 }

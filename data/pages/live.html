@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="card">
+    <header>
+      <h1>Live</h1>
+    </header>
+    <nav>
+      <a href="/">Accueil</a>
+      <a href="/history">Graphiques</a>
+      <a class="active" href="/live">Live</a>
+      <a href="/profile">Profil</a>
+      <a href="/console">Console</a>
+    </nav>
+    <main>
+      <h2>Tendance PWM et temperatures</h2>
+      <div class="section">
+        <p>
+          <label for="range">Fenetre</label>
+          <select id="range">
+            <option value="300">5 min</option>
+            <option value="900" selected>15 min</option>
+            <option value="1800">30 min</option>
+            <option value="3600">60 min</option>
+          </select>
+        </p>
+        <canvas id="chart" width="900" height="320" style="width:100%;height:auto;display:block;"></canvas>
+        <p class="inline-help">
+          <span style="color:#4ad2ff">PWM (%)</span> |
+          <span style="color:#ffb454">Sonde 1 (&deg;C)</span> |
+          <span style="color:#7dff9a">Sonde 2 (&deg;C)</span>
+          - un point toutes les <span id="step">5</span> s, conserve en RAM (perdu au redemarrage).
+        </p>
+      </div>
+      <div class="section">
+        <h3>Statistiques de la fenetre</h3>
+        <p>PWM : <span id="stDuty">--</span></p>
+        <p>Sonde 1 : <span id="stT0">--</span></p>
+        <p>Sonde 2 : <span id="stT1">--</span></p>
+      </div>
+      <div class="section">
+        <h3>Session de jeu</h3>
+        <p>En cours : <span id="sessCur">aucune</span></p>
+        <p>Derniere : <span id="sessLast">aucune</span></p>
+        <p class="inline-help">Une session demarre quand le PWM depasse le seuil IDLE COOL pendant 10 s et se termine apres 30 s sous ce seuil.</p>
+      </div>
+    </main>
+  </div>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const canvas = $('chart');
+      const ctx = canvas.getContext('2d');
+      const num = (v, unit) => (v === null || v === undefined) ? '--' : v.toFixed(1) + unit;
+      const fmtStats = (s, unit) => s ? 'min ' + num(s.min, unit) + ' | moy ' + num(s.avg, unit) + ' | max ' + num(s.max, unit) : '--';
+      const fmtDur = (sec) => Math.floor(sec / 60) + ' min ' + (sec % 60) + ' s';
+      const fmtSession = (s) => {
+        if (!s) return 'aucune';
+        let text = fmtDur(s.duration_s) + ' - PWM moy ' + num(s.avg_duty, ' %') + ', max ' + num(s.max_duty, ' %');
+        text += ', GAME HOT ' + fmtDur(s.hot_s);
+        if (s.max_t0 !== null) text += ', S1 max ' + num(s.max_t0, ' \u00b0C');
+        if (s.max_t1 !== null) text += ', S2 max ' + num(s.max_t1, ' \u00b0C');
+        return text;
+      };
+
+      function drawSeries(values, color, minV, maxV, left, top, w, h) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+        const n = values.length;
+        values.forEach((v, i) => {
+          if (v === null) { started = false; return; }
+          const x = left + (n > 1 ? i / (n - 1) : 0) * w;
+          const y = top + h - ((v - minV) / (maxV - minV)) * h;
+          if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+        });
+        ctx.stroke();
+      }
+
+      function bounds(series, fallbackMax) {
+        const all = series.flat().filter((v) => v !== null);
+        if (all.length === 0) return [0, fallbackMax];
+        const lo = Math.max(0, Math.floor(Math.min(...all) / 5) * 5);
+        const hi = Math.max(lo + 5, Math.ceil(Math.max(...all) / 5) * 5);
+        return [lo, hi];
+      }
+
+      function draw(d) {
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = 'rgba(3, 8, 15, 0.85)';
+        ctx.fillRect(0, 0, W, H);
+        const left = 50, right = W - 50, top = 16, bottom = H - 30;
+        const w = right - left, h = bottom - top;
+
+        if (d.count === 0) {
+          ctx.fillStyle = '#a2b4cd';
+          ctx.font = '16px sans-serif';
+          ctx.fillText('Aucune donnee pour le moment', left, top + 24);
+          return;
+        }
+
+        const [dMin, dMax] = bounds([d.duty], 30);
+        const [tMin, tMax] = bounds([d.t0, d.t1], 100);
+
+        ctx.strokeStyle = 'rgba(135, 164, 205, 0.24)';
+        ctx.fillStyle = '#a2b4cd';
+        ctx.font = '12px monospace';
+        for (let i = 0; i <= 4; i++) {
+          const y = top + (h * i) / 4;
+          ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+          ctx.fillText((dMax - ((dMax - dMin) * i) / 4).toFixed(0) + '%', 4, y + 4);
+          ctx.fillText((tMax - ((tMax - tMin) * i) / 4).toFixed(0) + '\u00b0', right + 6, y + 4);
+        }
+        const spanS = d.count * d.step_s;
+        ctx.fillText('-' + Math.round(spanS / 60) + ' min', left, H - 8);
+        ctx.fillText('maintenant', right - 70, H - 8);
+
+        drawSeries(d.duty, '#4ad2ff', dMin, dMax, left, top, w, h);
+        drawSeries(d.t0, '#ffb454', tMin, tMax, left, top, w, h);
+        drawSeries(d.t1, '#7dff9a', tMin, tMax, left, top, w, h);
+      }
+
+      async function refresh() {
+        try {
+          const r = await fetch('/api/live?range=' + $('range').value, { cache: 'no-store' });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const d = await r.json();
+          $('step').textContent = d.step_s;
+          draw(d);
+          $('stDuty').textContent = fmtStats(d.stats.duty, ' %');
+          $('stT0').textContent = fmtStats(d.stats.t0, ' \u00b0C');
+          $('stT1').textContent = fmtStats(d.stats.t1, ' \u00b0C');
+          $('sessCur').textContent = fmtSession(d.session.current);
+          $('sessLast').textContent = fmtSession(d.session.last);
+        } catch (e) { /* nouvelle tentative au tick suivant */ }
+      }
+
+      $('range').addEventListener('change', refresh);
+      refresh();
+      setInterval(refresh, 5000);
+    })();
+  </script>
+</body>
+</html>

@@ -125,15 +125,7 @@ void drawGraph() {
 }
 
 const char* getActiveProfileName() {
-  switch (getAppState().activeProfile) {
-    case ConsoleProfile::PS4_PRO:
-      return "PS4 PRO";
-    case ConsoleProfile::PS3_FAT:
-      return "PS3 FAT";
-    case ConsoleProfile::PS5_FAT:
-    default:
-      return "PS5 FAT";
-  }
+  return getConsoleProfileName(getAppState().activeProfile);
 }
 
 }  // namespace
@@ -176,18 +168,7 @@ void drawProfileImageScreen() {
   display.clearBuffer();
   display.setFont(u8g2_font_7x13B_tf);
 
-  switch (getAppState().activeProfile) {
-    case ConsoleProfile::PS5_FAT:
-      drawCenteredText("PS5 FAT", 13);
-      break;
-    case ConsoleProfile::PS4_PRO:
-      drawCenteredText("PS4 PRO", 13);
-      break;
-    case ConsoleProfile::PS3_FAT:
-    default:
-      drawCenteredText("PS3 FAT", 13);
-      break;
-  }
+  drawCenteredText(getConsoleProfileName(getAppState().activeProfile), 13);
 
   display.sendBuffer();
 }
